@@ -1,5 +1,4 @@
 "use strict";
-const nodemailer = require("nodemailer");
 const logger = require("./logger");
 
 const PLACEHOLDER_VALUES = new Set([
@@ -18,10 +17,8 @@ const isPlaceholder = (value) =>
       .toLowerCase(),
   );
 
-const isEmailConfigured = () =>
-  !isPlaceholder(process.env.EMAIL_HOST) &&
-  !isPlaceholder(process.env.EMAIL_USER) &&
-  !isPlaceholder(process.env.EMAIL_PASS);
+// We now only check EMAIL_PASS since it acts as the Brevo API Key
+const isEmailConfigured = () => !isPlaceholder(process.env.EMAIL_PASS);
 
 const handleMissingEmailConfig = (message) => {
   if (process.env.NODE_ENV === "production") {
@@ -30,42 +27,47 @@ const handleMissingEmailConfig = (message) => {
   logger.warn(message);
 };
 
-// Lazily create the transporter (avoids crash if env vars missing at import time)
-let _transporter;
-const getTransporter = () => {
-  if (_transporter) return _transporter;
-  _transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.EMAIL_PORT, 10) || 587,
-    secure: parseInt(process.env.EMAIL_PORT, 10) === 465,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    pool: true,
-    maxConnections: 5,
-    rateDelta: 1000,
-    rateLimit: 5, // max 5 emails/second
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-  });
-  return _transporter;
-};
+const sendBrevoEmail = async ({ to, subject, html, text }) => {
+  const apiKey = process.env.EMAIL_PASS;
+  const senderName = process.env.EMAIL_FROM_NAME || "CirQl 🎓";
+  const senderEmail = process.env.EMAIL_FROM_ADDRESS || "noreply@cirql.in";
 
-const sendMailWithTimeout = async (mailOptions, timeoutMs = 10000) => {
-  const transporter = getTransporter();
-  const sendPromise = transporter.sendMail(mailOptions);
-  const timeoutPromise = new Promise((_, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error("Email send timed out"));
-    }, timeoutMs);
-    sendPromise.finally(() => clearTimeout(timer));
-  });
-  return Promise.race([sendPromise, timeoutPromise]);
-};
+  const payload = {
+    sender: { name: senderName, email: senderEmail },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+    textContent: text,
+  };
 
-const FROM = `"${process.env.EMAIL_FROM_NAME || "CirQl 🎓"}" <${process.env.EMAIL_FROM_ADDRESS || "noreply@cirql.in"}>`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "api-key": apiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errorData = await res.text();
+      throw new Error(`Brevo API Error: ${res.status} - ${errorData}`);
+    }
+
+    return await res.json();
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
+  }
+};
 
 /**
  * Send OTP verification email.
@@ -135,8 +137,7 @@ const sendOTPEmail = async (to, name, otp) => {
 </body>
 </html>`;
 
-  await sendMailWithTimeout({
-    from: FROM,
+  await sendBrevoEmail({
     to,
     subject: `${otp} — Your CirQl Verification Code`,
     html,
@@ -205,8 +206,7 @@ const sendResetEmail = async (to, name, plainToken) => {
 </body>
 </html>`;
 
-  await sendMailWithTimeout({
-    from: FROM,
+  await sendBrevoEmail({
     to,
     subject: `Reset Your CirQl Password`,
     html,
