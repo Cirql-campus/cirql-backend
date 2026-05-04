@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm run audit
+
+      - name: Run tests
+        run: npm run test:ci
+        env:
+          NODE_ENV: test
+          DISABLE_CLUSTER: "true"
+          JWT_SECRET: test_jwt_secret_64_byte_value_for_ci_suite_only
+          JWT_REFRESH_SECRET: test_refresh_secret_64_byte_value_for_ci_suite_only
+          FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+          EMAIL_HOST: smtp.test.local
+          EMAIL_USER: test-user
+          EMAIL_PASS: test-pass
+          EMAIL_FROM_NAME: CirQl Test
+          EMAIL_FROM_ADDRESS: noreply@test.cirql
+          FRONTEND_URL: http://localhost:5173
+          FRONTEND_ORIGINS: http://localhost:5173
+          ALLOWED_COLLEGE_DOMAINS: kiet.edu,akgec.ac.in
+          ADMIN_EMAILS: admin@kiet.edu
+          BCRYPT_ROUNDS: "4"

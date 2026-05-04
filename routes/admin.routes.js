@@ -1,0 +1,157 @@
+'use strict';
+const express         = require('express');
+const { body, param, query } = require('express-validator');
+const adminController = require('../controllers/admin.controller');
+const { validate }    = require('../middleware/validate.middleware');
+
+const router = express.Router();
+
+// All routes here are already protected by protect + admin middleware in server.js
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+router.get('/stats', adminController.getStats);
+router.get('/dashboard', adminController.getDashboard);
+
+// ─── Listings ─────────────────────────────────────────────────────────────────
+router.get(
+  '/listing-reports',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1-50'),
+    query('status').optional().isIn(['open', 'reviewed', 'dismissed', 'actioned', 'all']).withMessage('Invalid status'),
+    query('listing').optional().isMongoId().withMessage('Invalid listing ID'),
+  ],
+  validate,
+  adminController.getListingReports
+);
+
+router.patch(
+  '/listing-reports/:id/status',
+  [
+    param('id').isMongoId().withMessage('Invalid report ID'),
+    body('status').isIn(['open', 'reviewed', 'dismissed', 'actioned']).withMessage('Invalid status'),
+    body('actionNote').optional().trim().isLength({ max: 500 }).withMessage('Action note too long'),
+  ],
+  validate,
+  adminController.updateListingReportStatus
+);
+
+router.get(
+  '/message-reports',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1-50'),
+    query('status').optional().isIn(['open', 'reviewed', 'dismissed', 'actioned', 'all']).withMessage('Invalid status'),
+    query('message').optional().isMongoId().withMessage('Invalid message ID'),
+  ],
+  validate,
+  adminController.getMessageReports
+);
+
+router.patch(
+  '/message-reports/:id/status',
+  [
+    param('id').isMongoId().withMessage('Invalid report ID'),
+    body('status').isIn(['open', 'reviewed', 'dismissed', 'actioned']).withMessage('Invalid status'),
+    body('actionNote').optional().trim().isLength({ max: 500 }).withMessage('Action note too long'),
+    body('hiddenByAdmin').optional().isBoolean().withMessage('hiddenByAdmin must be true or false'),
+    body('hiddenReason').optional().trim().isLength({ max: 300 }).withMessage('Hidden reason too long'),
+  ],
+  validate,
+  adminController.updateMessageReportStatus
+);
+
+router.get(
+  '/flagged-listings',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1–50'),
+  ],
+  validate,
+  adminController.getFlaggedListings
+);
+
+router.get(
+  '/moderation-listings',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1-50'),
+    query('status').optional().isIn(['pending', 'approved', 'rejected']).withMessage('Invalid moderation status'),
+  ],
+  validate,
+  adminController.getModerationListings
+);
+
+router.patch(
+  '/listings/:id/moderation',
+  [
+    param('id').isMongoId().withMessage('Invalid listing ID'),
+    body('moderationStatus').isIn(['pending', 'approved', 'rejected']).withMessage('Invalid moderation status'),
+    body('moderationReason').optional().trim().isLength({ max: 500 }).withMessage('Moderation reason too long'),
+  ],
+  validate,
+  adminController.updateListingModeration
+);
+
+router.put(
+  '/listings/:id/unflag',
+  [param('id').isMongoId().withMessage('Invalid listing ID')],
+  validate,
+  adminController.unflagListing
+);
+
+router.delete(
+  '/listings/:id',
+  [param('id').isMongoId().withMessage('Invalid listing ID')],
+  validate,
+  adminController.deleteListing
+);
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+router.get(
+  '/user-reports',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1-50'),
+    query('status').optional().isIn(['open', 'reviewed', 'dismissed', 'actioned', 'all']).withMessage('Invalid status'),
+  ],
+  validate,
+  adminController.getUserReports
+);
+
+router.patch(
+  '/user-reports/:id/status',
+  [
+    param('id').isMongoId().withMessage('Invalid report ID'),
+    body('status').isIn(['open', 'reviewed', 'dismissed', 'actioned']).withMessage('Invalid status'),
+  ],
+  validate,
+  adminController.updateUserReportStatus
+);
+
+router.get(
+  '/users',
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1–50'),
+    query('search').optional().isString().isLength({ max: 60 }).withMessage('search too long'),
+  ],
+  validate,
+  adminController.getUsers
+);
+
+router.put(
+  '/users/:id/ban',
+  [param('id').isMongoId().withMessage('Invalid user ID')],
+  validate,
+  adminController.banUser
+);
+
+router.put(
+  '/users/:id/unban',
+  [param('id').isMongoId().withMessage('Invalid user ID')],
+  validate,
+  adminController.unbanUser
+);
+
+module.exports = router;
