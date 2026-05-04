@@ -26,10 +26,6 @@ const OPTIONAL_GROUPS = [
     name: 'Redis production scaling',
     vars: ['REDIS_URL'],
   },
-  {
-    name: 'Sentry error monitoring',
-    vars: ['SENTRY_DSN'],
-  },
 ];
 
 const MIN_SECRET_LENGTH = 32;
@@ -66,9 +62,6 @@ module.exports = () => {
     }
     if (process.env.MONGODB_URI && !/mongodb\+srv:\/\//.test(process.env.MONGODB_URI)) {
       productionConfigErrors.push('Use a hosted MongoDB connection string, preferably mongodb+srv://, in production');
-    }
-    if (!process.env.SENTRY_DSN) {
-      productionConfigErrors.push('SENTRY_DSN is required in production for error monitoring');
     }
   }
 

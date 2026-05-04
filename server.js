@@ -10,8 +10,6 @@ require("./utils/validateEnv")();
 const cluster = require("cluster");
 const os = require("os");
 const logger = require("./utils/logger");
-const monitoring = require("./utils/monitoring");
-monitoring.initMonitoring();
 const shouldUseCluster =
   process.env.NODE_ENV === "production" &&
   process.env.DISABLE_CLUSTER !== "true";
@@ -263,7 +261,6 @@ if (cluster.isPrimary && shouldUseCluster) {
             ? "connected"
             : "configured_not_connected"
           : "disabled",
-        monitoring: monitoring.getMonitoringStatus(),
       });
     }
 
@@ -292,8 +289,6 @@ if (cluster.isPrimary && shouldUseCluster) {
     res.status(404).json({ success: false, message: "Route not found" });
   });
 
-  monitoring.setupExpressMonitoring(app);
-
   // ── Global error handler ───────────────────────────────────────────────────
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, _next) => {
@@ -305,7 +300,6 @@ if (cluster.isPrimary && shouldUseCluster) {
         ? "Internal server error"
         : err.message || "Internal server error";
     if (status >= 500) {
-      monitoring.captureException(err, req);
       logger.error(
         `[${req.requestId || "system"}] Global Error: ${err.message}`,
         err,
