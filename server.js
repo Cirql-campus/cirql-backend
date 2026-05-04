@@ -151,15 +151,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   // ── CORS ────────────────────────────────────────────────────────────────────
   app.use(
     cors({
-      origin: (origin, cb) => {
-        if (!origin) return cb(null, true);
-        if (allowedOrigins.includes(origin)) return cb(null, true);
-        cb(
-          Object.assign(new Error(`CORS: origin "${origin}" not allowed`), {
-            status: 403,
-          }),
-        );
-      },
+      origin: true,
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: [
