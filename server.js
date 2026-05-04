@@ -13,8 +13,6 @@ const logger = require("./utils/logger");
 const shouldUseCluster =
   process.env.NODE_ENV === "production" &&
   process.env.DISABLE_CLUSTER !== "true";
-const jobs = require("./lib/cron");
-jobs.start();
 
 // ─── FIX CRASH-1 & CRASH-2 ──────────────────────────────────────────────────
 // The original code created `app` and `server` at module scope, meaning BOTH
@@ -42,6 +40,9 @@ if (cluster.isPrimary && shouldUseCluster) {
   setupMaster(httpServer, { loadBalancingMethod: "least-connection" });
   setupPrimary();
   cluster.setupPrimary({ serialization: "advanced" });
+
+  const jobs = require("./lib/cron");
+  jobs.start();
 
   httpServer.listen(PORT, () => {
     logger.info(
@@ -149,22 +150,31 @@ if (cluster.isPrimary && shouldUseCluster) {
   });
 
   // ── CORS ────────────────────────────────────────────────────────────────────
-  // app.use(
-  //   cors({
-  //     origin: true,
-  //     credentials: true,
-  //     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  //     allowedHeaders: [
-  //       "Content-Type",
-  //       "Authorization",
-  //       "X-Request-ID",
-  //       "X-CSRF-Token",
-  //     ],
-  //     maxAge: 86400,
-  //   }),
-  // );
-
-  app.use(cors());
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(
+          Object.assign(new Error(`CORS origin "${origin}" not allowed`), {
+            status: 403,
+          }),
+          false,
+        );
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Request-ID",
+        "X-CSRF-Token",
+      ],
+      maxAge: 86400,
+    }),
+  );
   // ── Compression ────────────────────────────────────────────────────────────
   app.use(compression());
 
@@ -311,6 +321,11 @@ if (cluster.isPrimary && shouldUseCluster) {
     ? 0
     : parseInt(process.env.PORT, 10) || 5000;
   const listenHost = shouldUseCluster ? "localhost" : undefined;
+  if (!shouldUseCluster) {
+    const jobs = require("./lib/cron");
+    jobs.start();
+  }
+
   server.listen(listenPort, listenHost, () => {
     const addr = server.address();
     logger.info(

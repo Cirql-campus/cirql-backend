@@ -1,20 +1,31 @@
-'use strict';
-const nodemailer = require('nodemailer');
-const logger = require('./logger');
+"use strict";
+const nodemailer = require("nodemailer");
+const logger = require("./logger");
 
-const PLACEHOLDER_VALUES = new Set(['', 'replace_me', 'changeme', 'change_me', 'your_email', 'your_password']);
+const PLACEHOLDER_VALUES = new Set([
+  "",
+  "replace_me",
+  "changeme",
+  "change_me",
+  "your_email",
+  "your_password",
+]);
 
-const isPlaceholder = (value) => PLACEHOLDER_VALUES.has(String(value || '').trim().toLowerCase());
+const isPlaceholder = (value) =>
+  PLACEHOLDER_VALUES.has(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
 
-const isEmailConfigured = () => (
+const isEmailConfigured = () =>
   !isPlaceholder(process.env.EMAIL_HOST) &&
   !isPlaceholder(process.env.EMAIL_USER) &&
-  !isPlaceholder(process.env.EMAIL_PASS)
-);
+  !isPlaceholder(process.env.EMAIL_PASS);
 
 const handleMissingEmailConfig = (message) => {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Email service is not configured');
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Email service is not configured");
   }
   logger.warn(message);
 };
@@ -24,22 +35,37 @@ let _transporter;
 const getTransporter = () => {
   if (_transporter) return _transporter;
   _transporter = nodemailer.createTransport({
-    host:   process.env.EMAIL_HOST || 'smtp.gmail.com',
-    port:   parseInt(process.env.EMAIL_PORT, 10) || 587,
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port: parseInt(process.env.EMAIL_PORT, 10) || 587,
     secure: parseInt(process.env.EMAIL_PORT, 10) === 465,
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-    pool:           true,
+    pool: true,
     maxConnections: 5,
-    rateDelta:      1000,
-    rateLimit:      5, // max 5 emails/second
+    rateDelta: 1000,
+    rateLimit: 5, // max 5 emails/second
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
   });
   return _transporter;
 };
 
-const FROM = `"${process.env.EMAIL_FROM_NAME || 'CirQl 🎓'}" <${process.env.EMAIL_FROM_ADDRESS || 'noreply@cirql.in'}>`;
+const sendMailWithTimeout = async (mailOptions, timeoutMs = 10000) => {
+  const transporter = getTransporter();
+  const sendPromise = transporter.sendMail(mailOptions);
+  const timeoutPromise = new Promise((_, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Email send timed out"));
+    }, timeoutMs);
+    sendPromise.finally(() => clearTimeout(timer));
+  });
+  return Promise.race([sendPromise, timeoutPromise]);
+};
+
+const FROM = `"${process.env.EMAIL_FROM_NAME || "CirQl 🎓"}" <${process.env.EMAIL_FROM_ADDRESS || "noreply@cirql.in"}>`;
 
 /**
  * Send OTP verification email.
@@ -49,7 +75,9 @@ const FROM = `"${process.env.EMAIL_FROM_NAME || 'CirQl 🎓'}" <${process.env.EM
  */
 const sendOTPEmail = async (to, name, otp) => {
   if (!isEmailConfigured()) {
-    handleMissingEmailConfig(`[DEV OTP] Email service not configured; OTP for ${to}: ${otp}`);
+    handleMissingEmailConfig(
+      `[DEV OTP] Email service not configured; OTP for ${to}: ${otp}`,
+    );
     return { skipped: true };
   }
 
@@ -107,22 +135,22 @@ const sendOTPEmail = async (to, name, otp) => {
 </body>
 </html>`;
 
-  await getTransporter().sendMail({
-    from:    FROM,
+  await sendMailWithTimeout({
+    from: FROM,
     to,
     subject: `${otp} — Your CirQl Verification Code`,
     html,
-    text:    `Your CirQl verification code is: ${otp}\nIt expires in 10 minutes.`,
+    text: `Your CirQl verification code is: ${otp}\nIt expires in 10 minutes.`,
   });
 };
 
 /** Minimal HTML escaping to prevent name injection in the email */
 const escapeHtml = (str) =>
   String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 
 /**
  * Send Password Reset email.
@@ -131,9 +159,11 @@ const escapeHtml = (str) =>
  * @param {string} plainToken
  */
 const sendResetEmail = async (to, name, plainToken) => {
-  const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${plainToken}`;
+  const resetLink = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${plainToken}`;
   if (!isEmailConfigured()) {
-    handleMissingEmailConfig(`[DEV RESET] Email service not configured; reset link for ${to}: ${resetLink}`);
+    handleMissingEmailConfig(
+      `[DEV RESET] Email service not configured; reset link for ${to}: ${resetLink}`,
+    );
     return { skipped: true };
   }
 
@@ -175,12 +205,12 @@ const sendResetEmail = async (to, name, plainToken) => {
 </body>
 </html>`;
 
-  await getTransporter().sendMail({
-    from:    FROM,
+  await sendMailWithTimeout({
+    from: FROM,
     to,
     subject: `Reset Your CirQl Password`,
     html,
-    text:    `Reset your password using this link (expires in 15 mins): ${resetLink}`,
+    text: `Reset your password using this link (expires in 15 mins): ${resetLink}`,
   });
 };
 
