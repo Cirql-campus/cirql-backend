@@ -149,21 +149,22 @@ if (cluster.isPrimary && shouldUseCluster) {
   });
 
   // ── CORS ────────────────────────────────────────────────────────────────────
-  app.use(
-    cors({
-      origin: true,
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: [
-        "Content-Type",
-        "Authorization",
-        "X-Request-ID",
-        "X-CSRF-Token",
-      ],
-      maxAge: 86400,
-    }),
-  );
+  // app.use(
+  //   cors({
+  //     origin: true,
+  //     credentials: true,
+  //     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  //     allowedHeaders: [
+  //       "Content-Type",
+  //       "Authorization",
+  //       "X-Request-ID",
+  //       "X-CSRF-Token",
+  //     ],
+  //     maxAge: 86400,
+  //   }),
+  // );
 
+  app.use(cors());
   // ── Compression ────────────────────────────────────────────────────────────
   app.use(compression());
 
