@@ -63,7 +63,7 @@ const initSocket = (server) => {
 
   io = new Server(server, {
     cors: {
-      origin:      allowedOrigins,
+      origin:      true, // Allow all origins
       credentials: true,
       methods:     ['GET', 'POST'],
     },
