@@ -331,13 +331,7 @@ exports.refresh = async (req, res) => {
     }
 
     if (tokenRecord.used) {
-      // Grace period of 15 seconds to allow simultaneous requests from multiple tabs
-      if (tokenRecord.usedAt && (Date.now() - tokenRecord.usedAt.getTime() < 15000)) {
-        const { accessToken } = await issueTokens(user, res);
-        return success(res, { user: user.toPublicJSON(), accessToken });
-      }
-
-      // Token reuse detected outside grace period - invalidate completely
+      // Token reuse detected - invalidate completely
       await RefreshToken.deleteMany({ userId: user._id });
       user.tokenVersion = (user.tokenVersion || 0) + 1;
       await user.save();
@@ -351,7 +345,6 @@ exports.refresh = async (req, res) => {
 
     // Mark current token as used
     tokenRecord.used = true;
-    tokenRecord.usedAt = new Date();
     await tokenRecord.save();
 
     const { accessToken } = await issueTokens(user, res);

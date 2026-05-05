@@ -63,13 +63,7 @@ const initSocket = (server) => {
 
   io = new Server(server, {
     cors: {
-      origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error("Not allowed by CORS"));
-        }
-      },
+      origin:      true, // Allow all origins
       credentials: true,
       methods:     ['GET', 'POST'],
     },

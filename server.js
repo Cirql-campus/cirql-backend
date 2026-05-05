@@ -152,14 +152,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   // ── CORS ────────────────────────────────────────────────────────────────────
   app.use(
     cors({
-      origin: (origin, callback) => {
-        // allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error("Not allowed by CORS"));
-      },
+      origin: (origin, callback) => callback(null, true), // Allow all origins dynamically
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: [
