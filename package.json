@@ -43,6 +43,7 @@
     "redis": "^5.12.1",
     "socket.io": "^4.7.2",
     "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0",
     "xss": "^1.0.15",
     "zxcvbn": "^4.4.2"
   },
