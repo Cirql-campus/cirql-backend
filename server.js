@@ -41,8 +41,10 @@ if (cluster.isPrimary && shouldUseCluster) {
   setupPrimary();
   cluster.setupPrimary({ serialization: "advanced" });
 
-  const jobs = require("./lib/cron");
-  jobs.start();
+  if (process.env.NODE_ENV !== "test") {
+    const jobs = require("./lib/cron");
+    jobs.start();
+  }
 
   httpServer.listen(PORT, () => {
     logger.info(
@@ -152,7 +154,13 @@ if (cluster.isPrimary && shouldUseCluster) {
   // ── CORS ────────────────────────────────────────────────────────────────────
   app.use(
     cors({
-      origin: (origin, callback) => callback(null, true), // Allow all origins dynamically
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: [
@@ -310,7 +318,7 @@ if (cluster.isPrimary && shouldUseCluster) {
     ? 0
     : parseInt(process.env.PORT, 10) || 5000;
   const listenHost = shouldUseCluster ? "localhost" : undefined;
-  if (!shouldUseCluster) {
+  if (!shouldUseCluster && process.env.NODE_ENV !== "test") {
     const jobs = require("./lib/cron");
     jobs.start();
   }

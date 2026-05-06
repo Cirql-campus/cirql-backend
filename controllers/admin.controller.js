@@ -431,6 +431,7 @@ exports.getUsers = async (req, res) => {
       const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 60);
       filter.$or = [
         { name: new RegExp(safe, 'i') },
+        { email: new RegExp(safe, 'i') },
         { collegeDomain: new RegExp(safe, 'i') },
       ];
     }

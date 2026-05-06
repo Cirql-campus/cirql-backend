@@ -56,7 +56,7 @@ const createLimiter = rateLimit(makeOptions(
 ));
 
 const chatLimiter = rateLimit(makeOptions(
-  1, 60,
+  1, 200,
   'Too many chat actions. Please slow down.',
   'chat',
   true

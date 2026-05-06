@@ -82,7 +82,7 @@ const listingSchema = new mongoose.Schema({
   originalPrice: {
     type: Number,
     min:  [0, 'Original price cannot be negative'],
-    max:  [500000, 'Original price cannot exceed â‚¹5,00,000'],
+    max:  [500000, 'Original price cannot exceed Rs.5,00,000'],
   },
   quantity: {
     type:    Number,

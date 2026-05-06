@@ -10,9 +10,9 @@ const { isRedisEnabled, duplicateRedisClient } = require('../utils/redis');
 
 let io;
 
-// Per-socket message rate limiter (max 20 messages / 10 s)
+// Per-socket message rate limiter (max 35 messages / 10 s)
 const msgTimestamps = new Map(); // socketId → [timestamps]
-const MAX_MSGS  = 20;
+const MAX_MSGS  = 35;
 const WINDOW_MS = 10_000;
 
 const getCookieValue = (cookieHeader, name) => {
