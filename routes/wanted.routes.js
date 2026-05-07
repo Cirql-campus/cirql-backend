@@ -12,7 +12,7 @@ router.use(protect);
 
 router.get('/',
   [
-    query('category').optional().isIn(['all', 'academia', 'tech', 'rides', 'living', 'attire', 'misc']).withMessage('Invalid category'),
+    query('category').optional().isIn(['all', 'academia', 'tech', 'rides', 'living', 'attire', 'gifts', 'misc']).withMessage('Invalid category'),
     query('status').optional().isIn(['open', 'fulfilled', 'closed', 'all']).withMessage('Invalid status'),
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
     query('limit').optional().isInt({ min: 1, max: 30 }).withMessage('Limit must be 1-30'),
@@ -36,7 +36,7 @@ router.post('/',
   [
     body('title').trim().notEmpty().withMessage('Title is required').isLength({ min: 3, max: 100 }),
     body('description').optional().trim().isLength({ max: 1000 }).withMessage('Description too long'),
-    body('category').isIn(['academia', 'tech', 'rides', 'living', 'attire', 'misc']).withMessage('Invalid category'),
+    body('category').isIn(['academia', 'tech', 'rides', 'living', 'attire', 'gifts', 'misc']).withMessage('Invalid category'),
     body('minBudget').optional({ checkFalsy: true }).isFloat({ min: 0, max: 500000 }).withMessage('Minimum budget must be 0-500000'),
     body('maxBudget').optional({ checkFalsy: true }).isFloat({ min: 0, max: 500000 }).withMessage('Maximum budget must be 0-500000'),
     body('maxBudget').custom((value, { req }) => {

@@ -22,7 +22,7 @@ const savedSearchSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['academia', 'tech', 'rides', 'living', 'attire', 'misc', ''],
+    enum: ['academia', 'tech', 'rides', 'living', 'attire', 'gifts', 'misc', ''],
     default: '',
   },
   type: {

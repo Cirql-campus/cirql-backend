@@ -9,6 +9,7 @@ const { isCollegeEmail, detectCollege } = require("../utils/collegeDetect");
 const { sendOTPEmail, sendResetEmail } = require("../utils/email");
 const logger = require("../utils/logger");
 const { buildCookieOptions } = require("../utils/cookieOptions");
+const { isAdminEmail } = require("../utils/adminEmails");
 
 const normalizeEmail = (email) =>
   String(email || "")
@@ -100,21 +101,16 @@ exports.register = async (req, res) => {
       // Unverified — allow them to re-register (refreshes OTP)
       user.name = name.trim();
       user.password = password; // pre-save hook re-hashes
+      if (isAdminEmail(emailLower)) user.role = "admin";
     } else {
       const info = detectCollege(emailLower);
-      // Evaluate if explicit Admin status matches mapped environment variables securely
-      const adminEmails = process.env.ADMIN_EMAILS
-        ? process.env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase())
-        : [];
-      const isSpecialAdmin = adminEmails.includes(emailLower);
-
       user = new User({
         name: name.trim(),
         email: emailLower,
         password,
         college: info?.college || "University Campus",
         collegeDomain: info?.domain || emailLower.split("@")[1],
-        role: isSpecialAdmin ? "admin" : "user",
+        role: isAdminEmail(emailLower) ? "admin" : "user",
       });
     }
 
@@ -249,6 +245,11 @@ exports.login = async (req, res) => {
       }
       await User.updateOne({ _id: user._id }, update);
       return error(res, "Invalid email or password", 401);
+    }
+
+    if (isAdminEmail(emailLower) && user.role !== "admin") {
+      user.role = "admin";
+      await user.save();
     }
 
     // Reset lockout counters on success

@@ -2,6 +2,7 @@
 const jwt  = require('jsonwebtoken');
 const User = require('../models/User');
 const { error } = require('../utils/apiResponse');
+const { isAdminEmail } = require('../utils/adminEmails');
 
 const protect = async (req, res, next) => {
   let token = req.cookies?.cirql_access;
@@ -35,6 +36,11 @@ const protect = async (req, res, next) => {
     return error(res, 'Session invalidated — please log in again', 401);
   }
 
+  if (isAdminEmail(user.email) && user.role !== 'admin') {
+    user.role = 'admin';
+    await user.save();
+  }
+
   req.userId = user._id.toString();
   req.user   = user;
   next();
@@ -51,6 +57,10 @@ const optionalAuth = async (req, _res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select('+tokenVersion');
     if (user && user.tokenVersion === (decoded.tv ?? 0)) {
+      if (isAdminEmail(user.email) && user.role !== 'admin') {
+        user.role = 'admin';
+        await user.save();
+      }
       req.userId = user._id.toString();
       req.user   = user;
     }

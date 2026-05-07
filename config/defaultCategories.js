@@ -42,12 +42,20 @@ const DEFAULT_CATEGORIES = [
     sortOrder: 5,
   },
   {
+    slug: 'gifts',
+    label: 'Gifts',
+    description: 'Gifts, treats, keepsakes, and celebration items',
+    gradient: 'linear-gradient(135deg,#3d1b2d,#8b2d5c)',
+    color: '#ec4899',
+    sortOrder: 6,
+  },
+  {
     slug: 'misc',
     label: 'Misc',
     description: 'Everything else that does not fit above',
     gradient: 'linear-gradient(135deg,#2d2a1b,#8b7500)',
     color: '#d4a017',
-    sortOrder: 6,
+    sortOrder: 7,
   },
 ];
 

@@ -19,7 +19,7 @@ const wantedRequestSchema = new mongoose.Schema({
   category: {
     type: String,
     required: [true, 'Category is required'],
-    enum: ['academia', 'tech', 'rides', 'living', 'attire', 'misc'],
+    enum: ['academia', 'tech', 'rides', 'living', 'attire', 'gifts', 'misc'],
     lowercase: true,
     trim: true,
     index: true,
