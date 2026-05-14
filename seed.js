@@ -54,6 +54,12 @@ const CATEGORIES = [
     gradient: 'linear-gradient(135deg,#2d2a1b,#8b7500)',
     color: '#d4a017', sortOrder: 6,
   },
+  {
+    slug: 'services', label: 'Academic & Gigs', emoji: '🛠️',
+    description: 'Tutoring, project help, dorm cleaning, running errands',
+    gradient: 'linear-gradient(135deg,#2f1b3d,#8b2d5c)',
+    color: '#d946ef', sortOrder: 7,
+  },
 ];
 
 // ── Users ─────────────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ const Notification = require('../models/Notification');
 const { success, error } = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { listingCache, flushCacheNamespace } = require('../utils/cache');
+const { sendPushNotification } = require('../utils/push.util');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -18,6 +19,20 @@ const populateDeal = (query) => query
 
 const createNotification = async ({ user, text, link }) => {
   await Notification.create({ user, type: 'deal', text, link });
+
+  try {
+    const recipient = await User.findById(user);
+    await sendPushNotification(recipient, {
+      title: 'CirQl deal update',
+      body: text,
+      url: `${process.env.FRONTEND_URL}${link}`,
+      tag: `deal-${link.split('/').pop()}`,
+      type: 'deal',
+      preferenceKey: 'deals',
+    });
+  } catch (pushErr) {
+    logger.warn(`Deal push notification failed: ${pushErr.message}`);
+  }
 };
 
 const ensureParticipant = (deal, userId) =>

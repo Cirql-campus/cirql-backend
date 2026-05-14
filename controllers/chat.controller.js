@@ -9,6 +9,7 @@ const User         = require('../models/User');
 const UserBlock    = require('../models/UserBlock');
 const { success, error } = require('../utils/apiResponse');
 const { getIO } = require('../config/socket');
+const { sendPushNotification } = require('../utils/push.util');
 const logger = require('../utils/logger');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -307,6 +308,24 @@ exports.sendMessage = async (req, res) => {
     } catch (socketErr) {
       // Socket errors must never break the REST response
       logger.warn(`[${req.requestId}] Socket emit failed: ${socketErr.message}`);
+    }
+
+    // Send push notification to receiver
+    try {
+      const receiver = await User.findById(receiverId);
+      if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
+        const preferences = receiver.notificationPreferences || {};
+        await sendPushNotification(receiver, {
+          title: `New message from ${message.sender.name}`,
+          body: preferences.messagePreview ? safeText : 'Tap to view the message.',
+          url: `${process.env.FRONTEND_URL}/messages/${req.params.id}`,
+          tag: `message-${req.params.id}`,
+          type: 'message',
+          preferenceKey: 'messages',
+        });
+      }
+    } catch (pushErr) {
+      logger.warn(`[${req.requestId}] Push notify failed: ${pushErr.message}`);
     }
 
     return success(res, { message }, 'Message sent', 201);

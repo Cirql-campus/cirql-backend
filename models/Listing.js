@@ -52,7 +52,7 @@ const listingSchema = new mongoose.Schema({
   },
   type: {
     type:    String,
-    enum:    { values: ['sell', 'rent', 'free'], message: 'Invalid type' },
+    enum:    { values: ['sell', 'rent', 'free', 'service'], message: 'Invalid type' },
     default: 'sell',
   },
   status: {

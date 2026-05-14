@@ -9,6 +9,9 @@ const { reportLimiter } = require('../middleware/rateLimit.middleware');
 const router = express.Router();
 
 router.get('/me', protect, userController.getMe);
+router.post('/push/subscribe', protect, userController.subscribeToPush);
+router.delete('/push/subscribe', protect, userController.unsubscribeFromPush);
+router.patch('/notification-preferences', protect, userController.updateNotificationPreferences);
 router.get('/blocked', protect, userController.getBlockedUsers);
 
 router.put('/me',

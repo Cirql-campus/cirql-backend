@@ -14,7 +14,7 @@ const parseOrigins = (value = '') => value
   .filter(Boolean);
 
 const getAllowedOrigins = () => new Set([
-  ...parseOrigins(process.env.FRONTEND_ORIGINS || 'http://localhost:5173'),
+  ...parseOrigins(process.env.FRONTEND_ORIGINS || 'https://cirql.store,https://www.cirql.store'),
   ...parseOrigins(process.env.FRONTEND_URL || ''),
 ]);
 
@@ -29,7 +29,10 @@ const getRequestOrigin = (req) => {
   }
 };
 
-const isTrustedOrigin = (origin) => Boolean(origin && getAllowedOrigins().has(origin));
+const isTrustedOrigin = (origin) => (
+  process.env.NODE_ENV === 'development'
+  || Boolean(origin && getAllowedOrigins().has(origin))
+);
 
 const cookieOptions = () => buildCookieOptions({
   httpOnly: false,

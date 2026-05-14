@@ -112,10 +112,11 @@ if (cluster.isPrimary && shouldUseCluster) {
 
   // ── Allowed CORS origins ──────────────────────────────────────────────────
   const allowedOrigins = (
-    process.env.FRONTEND_ORIGINS || "http://localhost:5173"
+    process.env.FRONTEND_ORIGINS || "https://cirql.store,https://www.cirql.store"
   )
     .split(",")
     .map((o) => o.trim());
+  const allowAnyCorsOrigin = process.env.NODE_ENV === "development";
 
   // ── Security headers ───────────────────────────────────────────────────────
   app.use(
@@ -155,10 +156,10 @@ if (cluster.isPrimary && shouldUseCluster) {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || allowAnyCorsOrigin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          callback(new Error('Not allowed by CORS'));
+          callback(null, false);
         }
       },
       credentials: true,

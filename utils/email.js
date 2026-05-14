@@ -160,7 +160,7 @@ const escapeHtml = (str) =>
  * @param {string} plainToken
  */
 const sendResetEmail = async (to, name, plainToken) => {
-  const resetLink = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${plainToken}`;
+  const resetLink = `${process.env.FRONTEND_URL || "https://cirql.store"}/reset-password?token=${plainToken}`;
   if (!isEmailConfigured()) {
     handleMissingEmailConfig(
       `[DEV RESET] Email service not configured; reset link for ${to}: ${resetLink}`,

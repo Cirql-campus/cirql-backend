@@ -6,6 +6,15 @@ const crypto   = require('crypto');
 // Cost factor: 10 = ~150ms/hash (secure & fast); 12 = ~600ms (too slow for UX)
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS, 10) || 10;
 
+const DEFAULT_NOTIFICATION_PREFERENCES = {
+  pushEnabled:    true,
+  messages:       true,
+  deals:          true,
+  wanted:         true,
+  moderation:     true,
+  messagePreview: false,
+};
+
 const userSchema = new mongoose.Schema({
   name: {
     type:      String,
@@ -61,6 +70,17 @@ const userSchema = new mongoose.Schema({
 
   // Bump to invalidate all existing JWTs for this user
   tokenVersion: { type: Number, default: 0, select: false },
+
+  // Web Push Subscriptions
+  pushSubscriptions: { type: [Object], default: [] },
+  notificationPreferences: {
+    pushEnabled:    { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.pushEnabled },
+    messages:       { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.messages },
+    deals:          { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.deals },
+    wanted:         { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.wanted },
+    moderation:     { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.moderation },
+    messagePreview: { type: Boolean, default: DEFAULT_NOTIFICATION_PREFERENCES.messagePreview },
+  },
 }, {
   timestamps: true,
   toJSON:    { virtuals: true },
@@ -129,6 +149,11 @@ userSchema.methods.toPublicJSON = function () {
     listingCount:  this.listingCount,
     soldCount:     this.soldCount,
     wishlist:      this.wishlist,
+    notificationPreferences: {
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+      ...(this.notificationPreferences?.toObject?.() || this.notificationPreferences || {}),
+    },
+    pushSubscriptionCount: this.pushSubscriptions?.length || 0,
     createdAt:     this.createdAt,
   };
 };

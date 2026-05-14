@@ -9,6 +9,8 @@ const UserBlock = require('../models/UserBlock');
 const { success, error } = require('../utils/apiResponse');
 const { getIO } = require('../config/socket');
 const logger = require('../utils/logger');
+const User = require('../models/User');
+const { sendPushNotification } = require('../utils/push.util');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -226,6 +228,20 @@ exports.respondToWantedRequest = async (req, res) => {
       });
     } catch (socketErr) {
       logger.warn(`[${req.requestId}] Wanted response socket emit failed: ${socketErr.message}`);
+    }
+
+    try {
+      const requester = await User.findById(wanted.requester._id);
+      await sendPushNotification(requester, {
+        title: 'New wanted item response',
+        body: `${req.user.name} responded to "${wanted.title}"`,
+        url: `${process.env.FRONTEND_URL}/messages/${conversation._id}`,
+        tag: `wanted-${wanted._id}`,
+        type: 'message',
+        preferenceKey: 'wanted',
+      });
+    } catch (pushErr) {
+      logger.warn(`[${req.requestId}] Wanted response push failed: ${pushErr.message}`);
     }
 
     const updatedConversation = await Conversation.findById(conversation._id)

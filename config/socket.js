@@ -58,7 +58,7 @@ const getAccessibleConversation = async (conversationId, userId) => {
 };
 
 const initSocket = (server) => {
-  const allowedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:5173')
+  const allowedOrigins = (process.env.FRONTEND_ORIGINS || 'https://cirql.store,https://www.cirql.store')
     .split(',').map(o => o.trim());
 
   io = new Server(server, {

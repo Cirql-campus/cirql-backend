@@ -12,6 +12,23 @@ const { success, error } = require('../utils/apiResponse');
 const logger   = require('../utils/logger');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+const NOTIFICATION_PREFERENCE_KEYS = new Set([
+  'pushEnabled',
+  'messages',
+  'deals',
+  'wanted',
+  'moderation',
+  'messagePreview',
+]);
+
+const isValidPushSubscription = (subscription) => Boolean(
+  subscription
+  && typeof subscription.endpoint === 'string'
+  && subscription.endpoint.length <= 500
+  && subscription.keys
+  && typeof subscription.keys.p256dh === 'string'
+  && typeof subscription.keys.auth === 'string'
+);
 
 const findReviewEligibleListing = async ({ reviewerId, sellerId, listingId }) => {
   const dealFilter = {
@@ -334,5 +351,90 @@ exports.getReviews = async (req, res) => {
   } catch (err) {
     logger.error(`[${req.requestId}] getReviews: ${err.message}`, err);
     return error(res, 'Failed to fetch reviews', 500);
+  }
+};
+// ─── POST /api/v1/users/push/subscribe ─────────────────────────────────────────
+exports.subscribeToPush = async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!isValidPushSubscription(subscription)) {
+      return error(res, 'Invalid subscription object', 400);
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return error(res, 'User not found', 404);
+
+    // Check if this specific subscription already exists to avoid duplicates
+    const exists = user.pushSubscriptions.some(sub => sub.endpoint === subscription.endpoint);
+    
+    if (!exists) {
+      user.pushSubscriptions.push(subscription);
+    }
+
+    user.set('notificationPreferences.pushEnabled', true);
+    await user.save();
+
+    return success(res, {
+      pushSubscriptionCount: user.pushSubscriptions.length,
+      notificationPreferences: user.toPublicJSON().notificationPreferences,
+    }, 'Push subscription saved successfully', 201);
+  } catch (err) {
+    logger.error(`[${req.requestId}] subscribeToPush: ${err.message}`, err);
+    return error(res, 'Failed to save push subscription', 500);
+  }
+};
+
+exports.unsubscribeFromPush = async (req, res) => {
+  try {
+    const endpoint = req.body?.endpoint || req.body?.subscription?.endpoint;
+    if (!endpoint || typeof endpoint !== 'string') {
+      return error(res, 'Subscription endpoint is required', 400);
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return error(res, 'User not found', 404);
+
+    user.pushSubscriptions = user.pushSubscriptions.filter(sub => sub.endpoint !== endpoint);
+    if (user.pushSubscriptions.length === 0) {
+      user.set('notificationPreferences.pushEnabled', false);
+    }
+    await user.save();
+
+    return success(res, {
+      pushSubscriptionCount: user.pushSubscriptions.length,
+      notificationPreferences: user.toPublicJSON().notificationPreferences,
+    }, 'Push subscription removed');
+  } catch (err) {
+    logger.error(`[${req.requestId}] unsubscribeFromPush: ${err.message}`, err);
+    return error(res, 'Failed to remove push subscription', 500);
+  }
+};
+
+exports.updateNotificationPreferences = async (req, res) => {
+  try {
+    const updates = {};
+    Object.entries(req.body || {}).forEach(([key, value]) => {
+      if (NOTIFICATION_PREFERENCE_KEYS.has(key) && typeof value === 'boolean') {
+        updates[`notificationPreferences.${key}`] = value;
+      }
+    });
+
+    if (Object.keys(updates).length === 0) {
+      return error(res, 'No valid notification preferences provided', 400);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.userId,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+    if (!user) return error(res, 'User not found', 404);
+
+    return success(res, {
+      notificationPreferences: user.toPublicJSON().notificationPreferences,
+    }, 'Notification preferences updated');
+  } catch (err) {
+    logger.error(`[${req.requestId}] updateNotificationPreferences: ${err.message}`, err);
+    return error(res, 'Failed to update notification preferences', 500);
   }
 };

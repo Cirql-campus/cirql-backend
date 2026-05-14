@@ -63,6 +63,7 @@ const COLLEGE_MAP = [
   { domain: 'asb.edu.in',             name: 'Asian School of Business (ASB) Noida' },
   { domain: 'apeejay.edu',            name: 'Apeejay Institute of Technology' },
   { domain: 'itsdentalcollege.com',   name: 'I.T.S Dental College Greater Noida' },
+  { domain: 'itsdentalcollege.edu.in',name: 'I.T.S Dental College Ghaziabad' },
   { domain: 'hierank.org',            name: 'Hierank Business School Noida' },
   { domain: 'jaipuria.ac.in',         name: 'Jaipuria Institute of Management Noida' },
   { domain: 'fddiindia.com',          name: 'Footwear Design and Development Institute (FDDI) Noida' },
@@ -125,7 +126,51 @@ const COLLEGE_MAP = [
   { domain: 'nitsikkim.ac.in',name: 'NIT Sikkim' },
   { domain: 'nitap.ac.in',    name: 'NIT Arunachal Pradesh' },
   { domain: 'nitmanipur.ac.in',name: 'NIT Manipur' },
-  { domain: 'nitandhra.ac.in',name: 'NIT Andhra Pradesh' }
+  { domain: 'nitandhra.ac.in',name: 'NIT Andhra Pradesh' },
+
+  // SRM Universities
+  { domain: 'srmist.edu.in',  name: 'SRM Institute of Science and Technology' },
+  { domain: 'srmap.edu.in',   name: 'SRM University AP' },
+  { domain: 'srmuniversity.ac.in', name: 'SRM University Delhi-NCR' },
+  { domain: 'srmtrichy.edu.in', name: 'SRM Institute of Science and Technology Trichy' },
+
+  // Girls Colleges in Delhi / Noida
+  { domain: 'ipcollege.ac.in', name: 'Indraprastha College for Women' },
+  { domain: 'mscw.ac.in',      name: 'Mata Sundri College for Women' },
+  { domain: 'lsr.edu.in',      name: 'Lady Shri Ram College for Women' },
+  { domain: 'mirandahouse.ac.in', name: 'Miranda House' },
+  { domain: 'gargicollege.in', name: 'Gargi College' },
+  { domain: 'gargi.du.ac.in',  name: 'Gargi College' },
+  { domain: 'jmc.ac.in',       name: 'Jesus and Mary College' },
+  { domain: 'dr.du.ac.in',     name: 'Daulat Ram College' },
+  { domain: 'maitreyi.ac.in',  name: 'Maitreyi College' },
+  { domain: 'knc.edu.in',      name: 'Kamla Nehru College' },
+  { domain: 'ladyirwin.edu.in',name: 'Lady Irwin College' },
+  { domain: 'kalindicollege.in', name: 'Kalindi College' },
+  { domain: 'kalindi.du.ac.in', name: 'Kalindi College' },
+  { domain: 'ihe-du.com',      name: 'Institute of Home Economics' },
+  { domain: 'ihe.du.ac.in',    name: 'Institute of Home Economics' },
+  { domain: 'satyameducation.in', name: 'Satyam College of Education' },
+  { domain: 'jdm.du.ac.in',    name: 'Janki Devi Memorial College' },
+  { domain: 'lakshmibaicollege.in', name: 'Lakshmibai College' },
+  { domain: 'bharaticollege.du.ac.in', name: 'Bharati College' },
+  { domain: 'vivekanandacollege.edu.in', name: 'Vivekananda College' },
+  { domain: 'bhagininiveditacollege.in', name: 'Bhagini Nivedita College' },
+  { domain: 'aditi.du.ac.in',  name: 'Aditi Mahavidyalaya' },
+  { domain: 'spm.du.ac.in',    name: 'Shyama Prasad Mukherji College for Women' },
+  { domain: 'rajgurucollege.com', name: 'Shaheed Rajguru College of Applied Sciences for Women' },
+  { domain: 'igdtuw.ac.in',    name: 'IGDTUW Delhi' },
+
+  // Medical Colleges in Delhi, Noida, Ghaziabad
+  { domain: 'aiims.edu', name: 'All India Institute of Medical Sciences (AIIMS) New Delhi' },
+  { domain: 'aiimsexams.ac.in', name: 'All India Institute of Medical Sciences (AIIMS) New Delhi' },
+  { domain: 'mamc.delhi.gov.in', name: 'Maulana Azad Medical College (MAMC)' },
+  { domain: 'lhmc-hosp.gov.in', name: 'Lady Hardinge Medical College (LHMC)' },
+  { domain: 'vmmc-sjh.nic.in', name: 'Vardhman Mahavir Medical College (VMMC)' },
+  { domain: 'ucms.ac.in', name: 'University College of Medical Sciences (UCMS)' },
+  { domain: 'santosh.ac.in', name: 'Santosh Medical College and Hospital Ghaziabad' },
+  { domain: 'gsmedicalcollege.in', name: 'G.S. Medical College & Hospital' },
+  { domain: 'niims.edu.in', name: 'Noida International Institute of Medical Sciences (NIIMS)' }
 ];
 
 /** Build a fast Set from the env var (runtime-configurable) */
