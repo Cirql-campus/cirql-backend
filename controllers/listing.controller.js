@@ -259,18 +259,26 @@ const notifyMatchingSavedSearches = async (listing, requestId) => {
     );
     if (matches.length === 0) return;
 
-    await Promise.all([
-      Notification.insertMany(matches.map(savedSearch => ({
-        user: savedSearch.user,
-        type: 'system',
-        text: `New listing matches your saved search${savedSearch.name ? `: ${savedSearch.name}` : ''}`,
-        link: `/listings/${listing._id}`,
-      }))),
-      SavedSearch.updateMany(
-        { _id: { $in: matches.map(savedSearch => savedSearch._id) } },
-        { $set: { lastNotifiedAt: new Date() } }
-      ),
-    ]);
+    const notifications = await Notification.insertMany(matches.map(savedSearch => ({
+      user: savedSearch.user,
+      type: 'system',
+      text: `New listing matches your saved search${savedSearch.name ? `: ${savedSearch.name}` : ''}`,
+      link: `/listings/${listing._id}`,
+    })));
+
+    await SavedSearch.updateMany(
+      { _id: { $in: matches.map(savedSearch => savedSearch._id) } },
+      { $set: { lastNotifiedAt: new Date() } }
+    );
+
+    try {
+      const io = getIO();
+      notifications.forEach(notification => {
+        io.to(`user_${notification.user}`).emit('new_notification', { notification });
+      });
+    } catch (socketErr) {
+      logger.warn(`[${requestId || 'system'}] Saved search socket emit failed: ${socketErr.message}`);
+    }
   } catch (err) {
     logger.warn(`[${requestId || 'system'}] Saved search notification failed: ${err.message}`);
   }
@@ -960,7 +968,7 @@ exports.reportListing = async (req, res) => {
 
     const admins = await User.find({ role: 'admin' }).select('_id').lean();
     if (admins.length > 0) {
-      await Notification.insertMany(
+      const adminNotifications = await Notification.insertMany(
         admins.map(a => ({
           user: a._id,
           type: 'report',
@@ -968,6 +976,14 @@ exports.reportListing = async (req, res) => {
           link: `/admin/listing-reports?listing=${listing._id}`,
         }))
       );
+      try {
+        const io = getIO();
+        adminNotifications.forEach(notification => {
+          io.to(`user_${notification.user}`).emit('new_notification', { notification });
+        });
+      } catch (socketErr) {
+        logger.warn(`[${req.requestId}] Admin report socket emit failed: ${socketErr.message}`);
+      }
     }
 
     // Auto-flag after 3 unique reports
@@ -976,7 +992,7 @@ exports.reportListing = async (req, res) => {
       await listing.save();
 
       if (admins.length > 0) {
-        await Notification.insertMany(
+        const autoFlagNotifications = await Notification.insertMany(
           admins.map(a => ({
             user: a._id,
             type: 'system',
@@ -984,6 +1000,14 @@ exports.reportListing = async (req, res) => {
             link: `/admin/listings/${listing._id}`,
           }))
         );
+        try {
+          const io = getIO();
+          autoFlagNotifications.forEach(notification => {
+            io.to(`user_${notification.user}`).emit('new_notification', { notification });
+          });
+        } catch (socketErr) {
+          logger.warn(`[${req.requestId}] Auto-flag socket emit failed: ${socketErr.message}`);
+        }
       }
     }
 

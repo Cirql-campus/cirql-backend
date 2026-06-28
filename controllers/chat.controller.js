@@ -49,12 +49,21 @@ const canStartConversationForListing = (listing, user) => {
 const notifyAdmins = async ({ text, link }) => {
   const admins = await User.find({ role: 'admin' }).select('_id').lean();
   if (admins.length === 0) return;
-  await Notification.insertMany(admins.map(adminUser => ({
+  const notifications = await Notification.insertMany(admins.map(adminUser => ({
     user: adminUser._id,
     type: 'report',
     text,
     link,
   })));
+
+  try {
+    const io = getIO();
+    notifications.forEach(notification => {
+      io.to(`user_${notification.user}`).emit('new_notification', { notification });
+    });
+  } catch (socketErr) {
+    logger.warn(`Admin notification socket emit failed: ${socketErr.message}`);
+  }
 };
 
 // ─── GET /chat/conversations ──────────────────────────────────────────────────
@@ -294,6 +303,19 @@ exports.sendMessage = async (req, res) => {
 
     await message.populate('sender', 'name avatar initials');
 
+    // Create Notification document for the receiver
+    let notification;
+    try {
+      notification = await Notification.create({
+        user: receiverId,
+        type: 'message',
+        text: `New message from ${message.sender.name}`,
+        link: `/messages/${req.params.id}`,
+      });
+    } catch (notifErr) {
+      logger.error(`[${req.requestId}] Message notification creation failed: ${notifErr.message}`);
+    }
+
     // Emit real-time events (non-blocking)
     try {
       const io = getIO();
@@ -305,6 +327,9 @@ exports.sendMessage = async (req, res) => {
         message,
         sender: req.userId,
       });
+      if (notification) {
+        io.to(`user_${receiverId}`).emit('new_notification', { notification });
+      }
     } catch (socketErr) {
       // Socket errors must never break the REST response
       logger.warn(`[${req.requestId}] Socket emit failed: ${socketErr.message}`);

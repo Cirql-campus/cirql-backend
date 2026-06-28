@@ -211,7 +211,7 @@ exports.respondToWantedRequest = async (req, res) => {
     ]);
     await message.populate('sender', 'name avatar initials');
 
-    await Notification.create({
+    const notification = await Notification.create({
       user: wanted.requester._id,
       type: 'message',
       text: `${req.user.name} responded to your wanted item "${wanted.title}"`,
@@ -221,11 +221,8 @@ exports.respondToWantedRequest = async (req, res) => {
     try {
       const io = getIO();
       io.to(`conv_${conversation._id}`).emit('new_message', { message, sender: req.userId });
-      io.to(`user_${wanted.requester._id}`).emit('notification', {
-        type: 'message',
-        text: `${req.user.name} responded to your wanted item "${wanted.title}"`,
-        link: `/messages/${conversation._id}`,
-      });
+      io.to(`user_${wanted.requester._id}`).emit('new_message', { message, sender: req.userId });
+      io.to(`user_${wanted.requester._id}`).emit('new_notification', { notification });
     } catch (socketErr) {
       logger.warn(`[${req.requestId}] Wanted response socket emit failed: ${socketErr.message}`);
     }

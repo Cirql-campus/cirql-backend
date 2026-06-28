@@ -340,7 +340,7 @@ exports.updateListingModeration = async (req, res) => {
     });
     if (!listing) return error(res, 'Listing not found', 404);
 
-    await Notification.create({
+    const notification = await Notification.create({
       user: listing.seller,
       type: 'moderation',
       text: moderationStatus === 'approved'
@@ -348,6 +348,13 @@ exports.updateListingModeration = async (req, res) => {
         : `Your listing was ${moderationStatus}.`,
       link: `/listings/${listing._id}`,
     });
+
+    try {
+      const { getIO } = require('../config/socket');
+      getIO().to(`user_${listing.seller}`).emit('new_notification', { notification });
+    } catch (socketErr) {
+      logger.warn(`Admin moderation socket emit failed: ${socketErr.message}`);
+    }
 
     await Promise.all([
       flushCacheNamespace(listingCache, 'listings'),

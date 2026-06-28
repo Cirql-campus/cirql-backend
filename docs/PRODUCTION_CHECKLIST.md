@@ -23,6 +23,7 @@ Use this before putting the campus marketplace in front of real users.
 - `ADMIN_EMAILS` contains only trusted admin college emails.
 - `SENTRY_DSN` is set before launch.
 - Backend logs are visible in the hosting dashboard and include crash/restart history.
+- `API_URL` is set to this backend's own public health URL (e.g. `https://yourbackend.onrender.com/health`). Verify in the hosting dashboard logs that `[CRON] GET ... succeeded` actually appears every ~14 minutes after deploy. If it doesn't appear, the env var is missing or misconfigured.
 - `REQUEST_TIMEOUT_MS` is set between `30000` and `60000` depending on hosting speed.
 - Cloudinary keys are set and the API secret has been rotated after any accidental exposure.
 

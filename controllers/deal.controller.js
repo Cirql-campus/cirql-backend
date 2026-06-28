@@ -18,7 +18,14 @@ const populateDeal = (query) => query
   .populate('seller', 'name initials avatar college isVerified rating reviewCount');
 
 const createNotification = async ({ user, text, link }) => {
-  await Notification.create({ user, type: 'deal', text, link });
+  const notification = await Notification.create({ user, type: 'deal', text, link });
+
+  try {
+    const { getIO } = require('../config/socket');
+    getIO().to(`user_${user}`).emit('new_notification', { notification });
+  } catch (socketErr) {
+    logger.warn(`Deal notification socket emit failed: ${socketErr.message}`);
+  }
 
   try {
     const recipient = await User.findById(user);
