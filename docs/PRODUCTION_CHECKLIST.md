@@ -17,6 +17,10 @@ Use this before putting the campus marketplace in front of real users.
 
 - `NODE_ENV=production`
 - `MONGODB_URI` points to the hosted production database.
+  - **Region Alignment Warning**: The database and backend service must be deployed in the same region.
+    - *Current Setup*: Render is in `gcp-us-west1` (Oregon, USA) and MongoDB Atlas is in `aws-ap-south-1` (Mumbai, India). This cross-region mismatch adds ~200-250ms of latency *per database round-trip*. Sequential queries (like auth refresh) pay this penalty multiple times, causing ~1s endpoint latency.
+    - *Recommendation*: Since the target users are in India (e.g., kiet.edu, akgec.ac.in), **redeploy the Render service in Singapore** and **create/migrate the MongoDB Atlas cluster in Singapore (`ap-southeast-1` on AWS or `asia-southeast1` on GCP)**. This reduces both DB latency (<5ms) and user-to-server latency (~50-80ms).
+  - **MongoDB Atlas Tier Note**: The free M0 tier has known shared-resource throughput limits. If request latency remains high after aligning regions, upgrade off the M0 tier before attempting further code optimizations.
 - `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `FIELD_ENCRYPTION_KEY` are unique and at least 32 characters.
 - `FRONTEND_URL` uses the deployed `https://` frontend URL.
 - `FRONTEND_ORIGINS` contains only deployed `https://` origins.
