@@ -2,6 +2,7 @@
 const express         = require('express');
 const { body, param, query } = require('express-validator');
 const adminController = require('../controllers/admin.controller');
+const asyncHandler    = require('../middleware/asyncHandler');
 const { validate }    = require('../middleware/validate.middleware');
 
 const router = express.Router();
@@ -9,8 +10,8 @@ const router = express.Router();
 // All routes here are already protected by protect + admin middleware in server.js
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
-router.get('/stats', adminController.getStats);
-router.get('/dashboard', adminController.getDashboard);
+router.get('/stats', asyncHandler(adminController.getStats));
+router.get('/dashboard', asyncHandler(adminController.getDashboard));
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
 router.get(
@@ -22,7 +23,7 @@ router.get(
     query('listing').optional().isMongoId().withMessage('Invalid listing ID'),
   ],
   validate,
-  adminController.getListingReports
+  asyncHandler(adminController.getListingReports)
 );
 
 router.patch(
@@ -33,7 +34,7 @@ router.patch(
     body('actionNote').optional().trim().isLength({ max: 500 }).withMessage('Action note too long'),
   ],
   validate,
-  adminController.updateListingReportStatus
+  asyncHandler(adminController.updateListingReportStatus)
 );
 
 router.get(
@@ -45,7 +46,7 @@ router.get(
     query('message').optional().isMongoId().withMessage('Invalid message ID'),
   ],
   validate,
-  adminController.getMessageReports
+  asyncHandler(adminController.getMessageReports)
 );
 
 router.patch(
@@ -58,7 +59,7 @@ router.patch(
     body('hiddenReason').optional().trim().isLength({ max: 300 }).withMessage('Hidden reason too long'),
   ],
   validate,
-  adminController.updateMessageReportStatus
+  asyncHandler(adminController.updateMessageReportStatus)
 );
 
 router.get(
@@ -68,7 +69,7 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1–50'),
   ],
   validate,
-  adminController.getFlaggedListings
+  asyncHandler(adminController.getFlaggedListings)
 );
 
 router.get(
@@ -79,7 +80,7 @@ router.get(
     query('status').optional().isIn(['pending', 'approved', 'rejected']).withMessage('Invalid moderation status'),
   ],
   validate,
-  adminController.getModerationListings
+  asyncHandler(adminController.getModerationListings)
 );
 
 router.patch(
@@ -90,21 +91,21 @@ router.patch(
     body('moderationReason').optional().trim().isLength({ max: 500 }).withMessage('Moderation reason too long'),
   ],
   validate,
-  adminController.updateListingModeration
+  asyncHandler(adminController.updateListingModeration)
 );
 
 router.put(
   '/listings/:id/unflag',
   [param('id').isMongoId().withMessage('Invalid listing ID')],
   validate,
-  adminController.unflagListing
+  asyncHandler(adminController.unflagListing)
 );
 
 router.delete(
   '/listings/:id',
   [param('id').isMongoId().withMessage('Invalid listing ID')],
   validate,
-  adminController.deleteListing
+  asyncHandler(adminController.deleteListing)
 );
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ router.get(
     query('status').optional().isIn(['open', 'reviewed', 'dismissed', 'actioned', 'all']).withMessage('Invalid status'),
   ],
   validate,
-  adminController.getUserReports
+  asyncHandler(adminController.getUserReports)
 );
 
 router.patch(
@@ -126,7 +127,7 @@ router.patch(
     body('status').isIn(['open', 'reviewed', 'dismissed', 'actioned']).withMessage('Invalid status'),
   ],
   validate,
-  adminController.updateUserReportStatus
+  asyncHandler(adminController.updateUserReportStatus)
 );
 
 router.get(
@@ -137,21 +138,21 @@ router.get(
     query('search').optional().isString().isLength({ max: 60 }).withMessage('search too long'),
   ],
   validate,
-  adminController.getUsers
+  asyncHandler(adminController.getUsers)
 );
 
 router.put(
   '/users/:id/ban',
   [param('id').isMongoId().withMessage('Invalid user ID')],
   validate,
-  adminController.banUser
+  asyncHandler(adminController.banUser)
 );
 
 router.put(
   '/users/:id/unban',
   [param('id').isMongoId().withMessage('Invalid user ID')],
   validate,
-  adminController.unbanUser
+  asyncHandler(adminController.unbanUser)
 );
 
 module.exports = router;

@@ -3,6 +3,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const dealController = require('../controllers/deal.controller');
+const asyncHandler = require('../middleware/asyncHandler');
 const { protect } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
@@ -17,7 +18,7 @@ router.get('/',
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  dealController.getMyDeals
+  asyncHandler(dealController.getMyDeals)
 );
 
 router.post('/',
@@ -27,13 +28,13 @@ router.post('/',
     body('meetupLocation').optional().trim().isLength({ max: 120 }).withMessage('Meetup location too long'),
   ],
   validate,
-  dealController.createDealRequest
+  asyncHandler(dealController.createDealRequest)
 );
 
 router.get('/:id',
   [param('id').isMongoId().withMessage('Invalid deal ID')],
   validate,
-  dealController.getDealById
+  asyncHandler(dealController.getDealById)
 );
 
 router.patch('/:id/status',
@@ -43,7 +44,7 @@ router.patch('/:id/status',
     body('note').optional().trim().isLength({ max: 500 }).withMessage('Note too long'),
   ],
   validate,
-  dealController.updateDealStatus
+  asyncHandler(dealController.updateDealStatus)
 );
 
 module.exports = router;

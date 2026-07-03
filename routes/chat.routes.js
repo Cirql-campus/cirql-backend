@@ -2,6 +2,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const chatController = require('../controllers/chat.controller');
+const asyncHandler = require('../middleware/asyncHandler');
 const { protect } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { chatLimiter, reportLimiter } = require('../middleware/rateLimit.middleware');
@@ -9,14 +10,14 @@ const { chatLimiter, reportLimiter } = require('../middleware/rateLimit.middlewa
 const router = express.Router();
 router.use(protect);
 
-router.get('/unread-count', chatController.getUnreadCount);
+router.get('/unread-count', asyncHandler(chatController.getUnreadCount));
 router.get('/conversations',
   [
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  chatController.getConversations
+  asyncHandler(chatController.getConversations)
 );
 
 router.post('/conversations',
@@ -26,7 +27,7 @@ router.post('/conversations',
     body('sellerId').isMongoId().withMessage('Invalid seller ID'),
   ],
   validate,
-  chatController.createOrGetConversation
+  asyncHandler(chatController.createOrGetConversation)
 );
 
 router.get('/conversations/:id/messages',
@@ -36,7 +37,7 @@ router.get('/conversations/:id/messages',
     query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be 1-100'),
   ],
   validate,
-  chatController.getMessages
+  asyncHandler(chatController.getMessages)
 );
 
 router.post('/conversations/:id/messages',
@@ -46,7 +47,7 @@ router.post('/conversations/:id/messages',
     body('text').trim().notEmpty().withMessage('Message text is required').isLength({ max: 1000 }),
   ],
   validate,
-  chatController.sendMessage
+  asyncHandler(chatController.sendMessage)
 );
 
 router.post('/messages/:id/report',
@@ -57,7 +58,7 @@ router.post('/messages/:id/report',
     body('details').optional().trim().isLength({ max: 500 }).withMessage('Details must be at most 500 characters'),
   ],
   validate,
-  chatController.reportMessage
+  asyncHandler(chatController.reportMessage)
 );
 
 module.exports = router;

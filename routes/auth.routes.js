@@ -67,7 +67,7 @@ router.post('/login',
 router.post('/refresh', asyncHandler(authController.refresh));
 
 // POST /api/auth/logout
-router.post('/logout', authController.logout);
+router.post('/logout', asyncHandler(authController.logout));
 
 // GET /api/v1/auth/me
 router.get('/me', protect, asyncHandler(userController.getMe));

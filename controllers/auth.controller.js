@@ -41,7 +41,6 @@ const handleDuplicateEmail = (err, res) => {
 const cookieBase = () => buildCookieOptions({ httpOnly: true });
 
 const issueTokens = async (user, res) => {
-  // Include tokenVersion so we can invalidate old tokens
   const payload = {
     id: user._id,
     tv: user.tokenVersion ?? 0,
@@ -55,7 +54,6 @@ const issueTokens = async (user, res) => {
     expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   });
 
-  // Store hashed refresh token in DB
   const tokenHash = crypto
     .createHash("sha256")
     .update(refreshToken)
@@ -98,7 +96,6 @@ exports.register = async (req, res) => {
       if (user.isVerified) {
         return error(res, "An account with this email already exists", 409);
       }
-      // Unverified — allow them to re-register (refreshes OTP)
       user.name = name.trim();
       user.password = password; // pre-save hook re-hashes
       if (isAdminEmail(emailLower)) user.role = "admin";
@@ -137,223 +134,193 @@ exports.register = async (req, res) => {
         503,
       );
     }
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Registration failed — please try again", 500);
+    throw err;
   }
 };
 
 // ─── Verify OTP ───────────────────────────────────────────────────────────────
 exports.verifyOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
+  const { email, otp } = req.body;
 
-    const user = await User.findOne({ email: normalizeEmail(email) }).select(
-      "+verifyOTPHash +verifyOTPExpiry +otpAttempts +tokenVersion",
+  const user = await User.findOne({ email: normalizeEmail(email) }).select(
+    "+verifyOTPHash +verifyOTPExpiry +otpAttempts +tokenVersion",
+  );
+
+  if (!user) return error(res, "No account found for this email", 404);
+  if (user.isVerified)
+    return error(res, "Email already verified — please log in", 400);
+
+  if ((user.otpAttempts || 0) >= 5) {
+    return error(
+      res,
+      "Too many failed attempts. Please request a new OTP.",
+      429,
     );
+  }
 
-    if (!user) return error(res, "No account found for this email", 404);
-    if (user.isVerified)
-      return error(res, "Email already verified — please log in", 400);
-
-    // Brute-force guard: max 5 attempts per OTP
-    if ((user.otpAttempts || 0) >= 5) {
-      return error(
-        res,
-        "Too many failed attempts. Please request a new OTP.",
-        429,
-      );
-    }
-
-    if (!user.verifyOTP(otp)) {
-      user.otpAttempts = (user.otpAttempts || 0) + 1;
-      await User.updateOne(
-        { _id: user._id },
-        { $set: { otpAttempts: user.otpAttempts } },
-      );
-      const left = 5 - user.otpAttempts;
-      return error(
-        res,
-        `Invalid or expired OTP. ${left} attempt(s) remaining.`,
-        400,
-      );
-    }
-
-    // Clear OTP fields
-    user.isVerified = true;
-    user.otpAttempts = 0;
-
+  if (!user.verifyOTP(otp)) {
+    user.otpAttempts = (user.otpAttempts || 0) + 1;
     await User.updateOne(
       { _id: user._id },
-      {
-        $set: { isVerified: true, otpAttempts: 0 },
-        $unset: { verifyOTPHash: 1, verifyOTPExpiry: 1 },
-      },
+      { $set: { otpAttempts: user.otpAttempts } },
     );
-
-    const { accessToken } = await issueTokens(user, res);
-    return success(
+    const left = 5 - user.otpAttempts;
+    return error(
       res,
-      { user: user.toPublicJSON(), accessToken },
-      "Email verified — welcome to CirQl!",
+      `Invalid or expired OTP. ${left} attempt(s) remaining.`,
+      400,
     );
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Verification failed — please try again", 500);
   }
+
+  user.isVerified = true;
+  user.otpAttempts = 0;
+
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: { isVerified: true, otpAttempts: 0 },
+      $unset: { verifyOTPHash: 1, verifyOTPExpiry: 1 },
+    },
+  );
+
+  const { accessToken } = await issueTokens(user, res);
+  return success(
+    res,
+    { user: user.toPublicJSON(), accessToken },
+    "Email verified — welcome to CirQl!",
+  );
 };
 
 // ─── Login ────────────────────────────────────────────────────────────────────
 exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    // Explicitly select password, tokenVersion, and lockout fields
-    const emailLower = normalizeEmail(email);
-    const user = await User.findOne({ email: emailLower }).select(
-      "+password +tokenVersion +failedLoginAttempts +lockUntil",
+  const emailLower = normalizeEmail(email);
+  const user = await User.findOne({ email: emailLower }).select(
+    "+password +tokenVersion +failedLoginAttempts +lockUntil",
+  );
+
+  if (!user) {
+    await bcrypt.compare(
+      password,
+      "$2a$10$zWLJlFUv2vFd/UXGYLFb9u/72aOl3iIYXArI9Zi4VILwWUTzNWwd.",
     );
-
-    // Use the same error message for both "no user" and "wrong password".
-    // Dummy hash uses rounds=10 (same as BCRYPT_ROUNDS default) to prevent
-    // timing-attack leakage without adding unnecessary latency.
-    if (!user) {
-      await bcrypt.compare(
-        password,
-        "$2a$10$zWLJlFUv2vFd/UXGYLFb9u/72aOl3iIYXArI9Zi4VILwWUTzNWwd.",
-      );
-      return error(res, "Invalid email or password", 401);
-    }
-
-    if (user.lockUntil && user.lockUntil > Date.now()) {
-      return error(
-        res,
-        "Account temporarily locked. Please try again later.",
-        401,
-      );
-    }
-
-    if (!user.isVerified) {
-      return error(res, "Please verify your email before logging in", 401);
-    }
-
-    const match = await user.comparePassword(password);
-    if (!match) {
-      const attempts = (user.failedLoginAttempts || 0) + 1;
-      const update = { $inc: { failedLoginAttempts: 1 } };
-      if (attempts >= 5) {
-        update.$set = { lockUntil: new Date(Date.now() + 15 * 60 * 1000) };
-      }
-      await User.updateOne({ _id: user._id }, update);
-      return error(res, "Invalid email or password", 401);
-    }
-
-    if (isAdminEmail(emailLower) && user.role !== "admin") {
-      user.role = "admin";
-      await user.save();
-    }
-
-    // Reset lockout counters on success
-    await User.updateOne(
-      { _id: user._id },
-      { $set: { failedLoginAttempts: 0 }, $unset: { lockUntil: 1 } },
-    );
-
-    const { accessToken } = await issueTokens(user, res);
-    return success(
-      res,
-      { user: user.toPublicJSON(), accessToken },
-      "Logged in successfully",
-    );
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Login failed — please try again", 500);
+    return error(res, "Invalid email or password", 401);
   }
+
+  if (user.lockUntil && user.lockUntil > Date.now()) {
+    return error(
+      res,
+      "Account temporarily locked. Please try again later.",
+      401,
+    );
+  }
+
+  if (!user.isVerified) {
+    return error(res, "Please verify your email before logging in", 401);
+  }
+
+  const match = await user.comparePassword(password);
+  if (!match) {
+    const attempts = (user.failedLoginAttempts || 0) + 1;
+    const update = { $inc: { failedLoginAttempts: 1 } };
+    if (attempts >= 5) {
+      update.$set = { lockUntil: new Date(Date.now() + 15 * 60 * 1000) };
+    }
+    await User.updateOne({ _id: user._id }, update);
+    return error(res, "Invalid email or password", 401);
+  }
+
+  if (isAdminEmail(emailLower) && user.role !== "admin") {
+    user.role = "admin";
+    await user.save();
+  }
+
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { failedLoginAttempts: 0 }, $unset: { lockUntil: 1 } },
+  );
+
+  const { accessToken } = await issueTokens(user, res);
+  return success(
+    res,
+    { user: user.toPublicJSON(), accessToken },
+    "Logged in successfully",
+  );
 };
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 exports.logout = async (req, res) => {
-  try {
-    const refreshToken = req.cookies?.cirql_refresh;
-    if (refreshToken) {
-      const tokenHash = crypto
-        .createHash("sha256")
-        .update(refreshToken)
-        .digest("hex");
-      await RefreshToken.deleteOne({ tokenHash });
-    }
-    res.clearCookie("cirql_access", cookieBase());
-    res.clearCookie("cirql_refresh", cookieBase());
-    return success(res, null, "Logged out successfully");
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Logout failed", 500);
-  }
-};
-
-// ─── Refresh access token ─────────────────────────────────────────────────────
-exports.refresh = async (req, res) => {
-  try {
-    const refreshToken = req.cookies?.cirql_refresh;
-    if (!refreshToken)
-      return error(res, "No refresh token — please log in", 401);
-
-    let decoded;
-    try {
-      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    } catch {
-      res.clearCookie("cirql_refresh", cookieBase());
-      return error(
-        res,
-        "Invalid or expired refresh token — please log in",
-        401,
-      );
-    }
-
-    const user = await User.findById(decoded.id).select("+tokenVersion");
-    if (!user) return error(res, "Account no longer exists", 401);
-
-    if (user.tokenVersion !== (decoded.tv ?? 0)) {
-      res.clearCookie("cirql_refresh", cookieBase());
-      return error(res, "Session invalidated — please log in again", 401);
-    }
-
+  const refreshToken = req.cookies?.cirql_refresh;
+  if (refreshToken) {
     const tokenHash = crypto
       .createHash("sha256")
       .update(refreshToken)
       .digest("hex");
-    const tokenRecord = await RefreshToken.findOne({
-      userId: user._id,
-      tokenHash,
-    });
-
-    if (!tokenRecord) {
-      res.clearCookie("cirql_refresh", cookieBase());
-      return error(res, "Invalid refresh token", 401);
-    }
-
-    if (tokenRecord.used) {
-      // Token reuse detected - invalidate completely
-      await RefreshToken.deleteMany({ userId: user._id });
-      user.tokenVersion = (user.tokenVersion || 0) + 1;
-      await user.save();
-      res.clearCookie("cirql_refresh", cookieBase());
-      return error(
-        res,
-        "Security alert: Token reuse detected. All sessions invalidated.",
-        401,
-      );
-    }
-
-    // Mark current token as used
-    tokenRecord.used = true;
-    await tokenRecord.save();
-
-    const { accessToken } = await issueTokens(user, res);
-    return success(res, { user: user.toPublicJSON(), accessToken });
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Token refresh failed", 500);
+    await RefreshToken.deleteOne({ tokenHash });
   }
+  res.clearCookie("cirql_access", cookieBase());
+  res.clearCookie("cirql_refresh", cookieBase());
+  return success(res, null, "Logged out successfully");
+};
+
+// ─── Refresh access token ─────────────────────────────────────────────────────
+exports.refresh = async (req, res) => {
+  const refreshToken = req.cookies?.cirql_refresh;
+  if (!refreshToken)
+    return error(res, "No refresh token — please log in", 401);
+
+  let decoded;
+  try {
+    decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+  } catch {
+    res.clearCookie("cirql_refresh", cookieBase());
+    return error(
+      res,
+      "Invalid or expired refresh token — please log in",
+      401,
+    );
+  }
+
+  const user = await User.findById(decoded.id).select("+tokenVersion");
+  if (!user) return error(res, "Account no longer exists", 401);
+
+  if (user.tokenVersion !== (decoded.tv ?? 0)) {
+    res.clearCookie("cirql_refresh", cookieBase());
+    return error(res, "Session invalidated — please log in again", 401);
+  }
+
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+  const tokenRecord = await RefreshToken.findOne({
+    userId: user._id,
+    tokenHash,
+  });
+
+  if (!tokenRecord) {
+    res.clearCookie("cirql_refresh", cookieBase());
+    return error(res, "Invalid refresh token", 401);
+  }
+
+  if (tokenRecord.used) {
+    await RefreshToken.deleteMany({ userId: user._id });
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+    res.clearCookie("cirql_refresh", cookieBase());
+    return error(
+      res,
+      "Security alert: Token reuse detected. All sessions invalidated.",
+      401,
+    );
+  }
+
+  tokenRecord.used = true;
+  await tokenRecord.save();
+
+  const { accessToken } = await issueTokens(user, res);
+  return success(res, { user: user.toPublicJSON(), accessToken });
 };
 
 // ─── Resend OTP ───────────────────────────────────────────────────────────────
@@ -368,7 +335,6 @@ exports.resendOTP = async (req, res) => {
     if (!user) return error(res, "No account found for this email", 404);
     if (user.isVerified) return error(res, "Email already verified", 400);
 
-    // Throttle: don't allow resend if current OTP is <1 min old
     if (
       user.verifyOTPExpiry &&
       user.verifyOTPExpiry - Date.now() > 9 * 60 * 1000
@@ -392,106 +358,87 @@ exports.resendOTP = async (req, res) => {
         503,
       );
     }
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Failed to resend OTP", 500);
+    throw err;
   }
 };
 
 // ─── Forgot Password ──────────────────────────────────────────────────────────
 exports.forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-    const emailLower = normalizeEmail(email);
-    const user = await User.findOne({ email: emailLower });
+  const { email } = req.body;
+  const emailLower = normalizeEmail(email);
+  const user = await User.findOne({ email: emailLower });
 
-    // Always return success even if no user to prevent email enumeration
-    if (!user)
-      return success(
-        res,
-        {},
-        "If an account with that email exists, we sent a password reset link.",
-      );
-
-    const resetToken = crypto.randomBytes(64).toString("hex");
-    user.resetPasswordHash = crypto
-      .createHash("sha256")
-      .update(resetToken)
-      .digest("hex");
-    user.resetPasswordExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-    await user.save();
-
-    await sendResetEmail(emailLower, user.name, resetToken);
+  if (!user)
     return success(
       res,
       {},
       "If an account with that email exists, we sent a password reset link.",
     );
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Failed to process forgot password request", 500);
-  }
+
+  const resetToken = crypto.randomBytes(64).toString("hex");
+  user.resetPasswordHash = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+  user.resetPasswordExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+  await user.save();
+
+  await sendResetEmail(emailLower, user.name, resetToken);
+  return success(
+    res,
+    {},
+    "If an account with that email exists, we sent a password reset link.",
+  );
 };
 
 // ─── Reset Password ───────────────────────────────────────────────────────────
 exports.resetPassword = async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-    const resetPasswordHash = crypto
-      .createHash("sha256")
-      .update(token)
-      .digest("hex");
+  const { token, newPassword } = req.body;
+  const resetPasswordHash = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
 
-    const user = await User.findOne({
-      resetPasswordHash,
-      resetPasswordExpiry: { $gt: new Date() },
-    }).select("+resetPasswordHash +resetPasswordExpiry +tokenVersion");
+  const user = await User.findOne({
+    resetPasswordHash,
+    resetPasswordExpiry: { $gt: new Date() },
+  }).select("+resetPasswordHash +resetPasswordExpiry +tokenVersion");
 
-    if (!user)
-      return error(res, "Invalid or expired password reset token", 400);
+  if (!user)
+    return error(res, "Invalid or expired password reset token", 400);
 
-    user.password = newPassword; // Pre-save hook hashes it automatically
-    user.resetPasswordHash = undefined;
-    user.resetPasswordExpiry = undefined;
-    user.tokenVersion = (user.tokenVersion || 0) + 1; // Log them out from everywhere
+  user.password = newPassword; // Pre-save hook hashes it automatically
+  user.resetPasswordHash = undefined;
+  user.resetPasswordExpiry = undefined;
+  user.tokenVersion = (user.tokenVersion || 0) + 1; // Log them out from everywhere
 
-    // Also explicitly destroy refresh tokens
-    await RefreshToken.deleteMany({ userId: user._id });
+  await RefreshToken.deleteMany({ userId: user._id });
+  await user.save();
 
-    await user.save();
-
-    return success(res, {}, "Password successfully reset. Please log in.");
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Failed to reset password", 500);
-  }
+  return success(res, {}, "Password successfully reset. Please log in.");
 };
 
 // ─── Change Password (Authenticated) ──────────────────────────────────────────
 exports.changePassword = async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    const user = await User.findById(req.userId).select(
-      "+password +tokenVersion",
-    );
+  const { currentPassword, newPassword } = req.body;
+  const user = await User.findById(req.userId).select(
+    "+password +tokenVersion",
+  );
 
-    if (!user) return error(res, "Account not found", 404);
+  if (!user) return error(res, "Account not found", 404);
 
-    const match = await user.comparePassword(currentPassword);
-    if (!match) return error(res, "Current password is incorrect", 401);
+  const match = await user.comparePassword(currentPassword);
+  if (!match) return error(res, "Current password is incorrect", 401);
 
-    user.password = newPassword;
-    user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate all sessions except one they're currently doing? For now, kicks out all.
-    await RefreshToken.deleteMany({ userId: user._id });
+  user.password = newPassword;
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  await RefreshToken.deleteMany({ userId: user._id });
 
-    await user.save();
+  await user.save();
 
-    return success(
-      res,
-      {},
-      "Password successfully changed. Please log in again.",
-    );
-  } catch (err) {
-    logger.error(`[${req.requestId}] ${err.message}`, err);
-    return error(res, "Failed to change password", 500);
-  }
+  return success(
+    res,
+    {},
+    "Password successfully changed. Please log in again.",
+  );
 };

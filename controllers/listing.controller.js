@@ -4,7 +4,6 @@ const Listing  = require('../models/Listing');
 const User     = require('../models/User');
 const Report   = require('../models/Report');
 const Notification    = require('../models/Notification');
-const SavedSearch = require('../models/SavedSearch');
 const { getIO } = require('../config/socket');
 const { success, error } = require('../utils/apiResponse');
 const logger   = require('../utils/logger');
@@ -239,6 +238,7 @@ const savedSearchMatchesListing = (savedSearch, listing) => {
 };
 
 const notifyMatchingSavedSearches = async (listing, requestId) => {
+  const SavedSearch = require('../models/SavedSearch');
   try {
     const candidates = await SavedSearch.find({
       alertsEnabled: true,
@@ -284,234 +284,35 @@ const notifyMatchingSavedSearches = async (listing, requestId) => {
   }
 };
 
-// ─── GET /api/v1/listings ─────────────────────────────────────────────────────
-exports.getListings = async (req, res) => {
-  try {
-    const campusScope = getCampusScope(req);
-    if (!campusScope) return error(res, 'Please log in to view campus listings', 401);
-    if (!campusScope.isAdmin && !campusScope.college) {
-      return error(res, 'Your account is missing a campus. Please contact support.', 403);
-    }
-
-    const cacheScope = campusScope.isAdmin ? 'admin' : `college:${campusScope.college}`;
-    const cacheKey = `${cacheScope}:${req.originalUrl}`;
-    const cachedListings = await getCacheValue(listingCache, 'listings', cacheKey);
-    if (cachedListings) {
-      res.setHeader('X-Cache', 'HIT');
-      return success(res, cachedListings);
-    }
-    res.setHeader('X-Cache', 'MISS');
-
-    const {
-      category, type, college, search, cursor,
-      minPrice, maxPrice, condition, status, location, tags,
-      sort  = 'newest',
-      limit = 20,
-    } = req.query;
-
-    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
-    const filter = { isActive: true, moderationStatus: APPROVED_MODERATION_FILTER };
-
-    if (category && !['All', 'all'].includes(category)) filter.category = String(category).toLowerCase();
-    if (type)    filter.type    = type;
-    if (condition) filter.condition = condition;
-    if (status) filter.status = status;
-    else filter.status = { $in: ['available', 'reserved', null] };
-    if (campusScope.isAdmin) {
-      if (college) filter.college = college;
-    } else {
-      filter.college = campusScope.college;
-    }
-    if (location) filter.location = new RegExp(location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 60), 'i');
-    const normalizedTags = normalizeTags(tags);
-    if (normalizedTags.length > 0) filter.tags = { $all: normalizedTags };
-    const priceFilter = {};
-    if (minPrice !== undefined) priceFilter.$gte = Number(minPrice);
-    if (maxPrice !== undefined) priceFilter.$lte = Number(maxPrice);
-    if (Object.keys(priceFilter).length > 0) filter.price = priceFilter;
-
-    if (search) {
-      const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
-      filter.$text = { $search: safe };
-    }
-
-    if (cursor && isValidId(cursor)) {
-      filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
-    }
-
-    let sortOpt = { _id: -1 };
-    if (sort === 'price_asc')  sortOpt = { price:  1, _id:  1 };
-    if (sort === 'price_desc') sortOpt = { price: -1, _id: -1 };
-    if (sort === 'views')      sortOpt = { views: -1, _id: -1 };
-    if (search && sort === 'newest') sortOpt = { score: { $meta: 'textScore' } };
-
-    const listings = await Listing.find(filter)
-      .sort(sortOpt)
-      .limit(parsedLimit + 1)
-      .select('title price originalPrice isNegotiable quantity category type status condition images coverImageIndex seller college location pickupLocation tags brand model views isActive isSold createdAt')
-      .populate('seller', 'name avatar initials college rating isVerified')
-      .lean();
-
-    const hasMore   = listings.length > parsedLimit;
-    const finalData = hasMore ? listings.slice(0, parsedLimit) : listings;
-    const nextCursor = hasMore ? finalData[finalData.length - 1]._id : null;
-
-    const payload = {
-      listings: finalData.map(decorateListingImages),
-      pagination: { limit: parsedLimit, hasMore, nextCursor },
-    };
-
-    await setCacheValue(listingCache, 'listings', cacheKey, payload, 30);
-    return success(res, payload);
-  } catch (err) {
-    logger.error(`[${req.requestId}] getListings: ${err.message}`, err);
-    return error(res, 'Failed to fetch listings', 500);
-  }
-};
-
-// ─── GET /api/v1/listings/search/suggestions ──────────────────────────────────
-exports.getSearchSuggestions = async (req, res) => {
-  try {
-    const campusScope = getCampusScope(req);
-    if (!campusScope) return error(res, 'Please log in to view campus listings', 401);
-    if (!campusScope.isAdmin && !campusScope.college) {
-      return error(res, 'Your account is missing a campus. Please contact support.', 403);
-    }
-
-    const { q } = req.query;
-    if (!q || q.trim().length < 2) return success(res, { suggestions: [] });
-
-    const normalizedQuery = q.toLowerCase().trim();
-    const cacheScope = campusScope.isAdmin ? 'admin' : `college:${campusScope.college}`;
-    const cacheKey = `${cacheScope}:${normalizedQuery}`;
-    const cached = await getCacheValue(suggestionCache, 'suggestions', cacheKey);
-    if (cached) return success(res, { suggestions: cached });
-
-    const safe   = normalizedQuery.replace(/[.*+?^$()|[\]\\]/g, '\\$&').slice(0, 50);
-    const match = {
-      title: new RegExp(safe, 'i'),
-      isActive: true,
-      moderationStatus: APPROVED_MODERATION_FILTER,
-    };
-    if (!campusScope.isAdmin) match.college = campusScope.college;
-    const result = await Listing.aggregate([
-      { $match: match },
-      { $group: { _id: '$title' } },
-      { $limit: 8 },
-    ]);
-
-    const suggestions = result.map(r => r._id);
-    await setCacheValue(suggestionCache, 'suggestions', cacheKey, suggestions, 30);
-
-    return success(res, { suggestions });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getSearchSuggestions: ${err.message}`, err);
-    return error(res, 'Failed to fetch suggestions', 500);
-  }
-};
-
-exports.getSavedSearches = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
-    const filter = { user: req.userId };
-    const [savedSearches, total] = await Promise.all([
-      SavedSearch.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      SavedSearch.countDocuments(filter),
-    ]);
-    return success(res, {
-      savedSearches,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasMore: page * limit < total,
-      },
-    });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getSavedSearches: ${err.message}`, err);
-    return error(res, 'Failed to fetch saved searches', 500);
-  }
-};
-
-exports.createSavedSearch = async (req, res) => {
-  try {
-    const savedSearch = await SavedSearch.create({
-      user: req.userId,
-      name: (req.body.name || '').trim(),
-      query: (req.body.query || '').trim(),
-      category: req.body.category || '',
-      type: req.body.type || '',
-      minPrice: req.body.minPrice === undefined || req.body.minPrice === '' ? undefined : Number(req.body.minPrice),
-      maxPrice: req.body.maxPrice === undefined || req.body.maxPrice === '' ? undefined : Number(req.body.maxPrice),
-      condition: req.body.condition || '',
-      location: (req.body.location || '').trim(),
-      tags: normalizeTags(req.body.tags),
-      alertsEnabled: req.body.alertsEnabled === undefined ? true : parseBoolean(req.body.alertsEnabled),
-    });
-
-    return success(res, { savedSearch }, 'Saved search created', 201);
-  } catch (err) {
-    logger.error(`[${req.requestId}] createSavedSearch: ${err.message}`, err);
-    if (err.name === 'ValidationError') {
-      return error(res, Object.values(err.errors)[0].message, 422);
-    }
-    return error(res, 'Failed to create saved search', 500);
-  }
-};
-
-exports.deleteSavedSearch = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid saved search ID', 400);
-    const result = await SavedSearch.deleteOne({ _id: req.params.id, user: req.userId });
-    if (result.deletedCount === 0) return error(res, 'Saved search not found', 404);
-    return success(res, null, 'Saved search deleted');
-  } catch (err) {
-    logger.error(`[${req.requestId}] deleteSavedSearch: ${err.message}`, err);
-    return error(res, 'Failed to delete saved search', 500);
-  }
-};
-
 // ─── GET /api/v1/listings/:id ─────────────────────────────────────────────────
 exports.getListingById = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
-    if (!req.user) return error(res, 'Please log in to view campus listings', 401);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  if (!req.user) return error(res, 'Please log in to view campus listings', 401);
 
-    const cacheKey = `user:${req.userId || req.user._id}:${req.originalUrl}`;
-    const cachedListing = await getCacheValue(listingCache, 'listings', cacheKey);
-    if (cachedListing) {
-      res.setHeader('X-Cache', 'HIT');
-      return success(res, cachedListing);
-    }
-    res.setHeader('X-Cache', 'MISS');
-
-    const listing = await Listing.findById(req.params.id)
-      .populate('seller', 'name avatar initials college rating reviewCount isVerified createdAt')
-      .lean();
-
-    if (!isPublicListingVisibleToUser(listing, req.user)) {
-      return error(res, 'Listing not found', 404);
-    }
-
-    if (idToString(listing.seller) !== req.userId) {
-      listing.views = (listing.views || 0) + 1;
-      await Listing.updateOne({ _id: listing._id }, { $inc: { views: 1 } });
-    }
-
-    const payload = { listing: decorateListingImages(listing) };
-    await setCacheValue(listingCache, 'listings', cacheKey, payload, 60);
-    return success(res, payload);
-  } catch (err) {
-    logger.error(`[${req.requestId}] getListingById: ${err.message}`, err);
-    return error(res, 'Failed to fetch listing', 500);
+  const cacheKey = `user:${req.userId || req.user._id}:${req.originalUrl}`;
+  const cachedListing = await getCacheValue(listingCache, 'listings', cacheKey);
+  if (cachedListing) {
+    res.setHeader('X-Cache', 'HIT');
+    return success(res, cachedListing);
   }
+  res.setHeader('X-Cache', 'MISS');
+
+  const listing = await Listing.findById(req.params.id)
+    .populate('seller', 'name avatar initials college rating reviewCount isVerified createdAt')
+    .lean();
+
+  if (!isPublicListingVisibleToUser(listing, req.user)) {
+    return error(res, 'Listing not found', 404);
+  }
+
+  if (idToString(listing.seller) !== req.userId) {
+    listing.views = (listing.views || 0) + 1;
+    await Listing.updateOne({ _id: listing._id }, { $inc: { views: 1 } });
+  }
+
+  const payload = { listing: decorateListingImages(listing) };
+  await setCacheValue(listingCache, 'listings', cacheKey, payload, 60);
+  return success(res, payload);
 };
 
 // ─── POST /api/v1/listings ────────────────────────────────────────────────────
@@ -578,11 +379,10 @@ exports.createListing = async (req, res) => {
     return success(res, { listing: decorateListingImages(listing) }, 'Listing created successfully', 201);
   } catch (err) {
     destroyCloudinaryImages({ files: req.files }, req.requestId);
-    logger.error(`[${req.requestId}] createListing: ${err.message}`, err);
     if (err.name === 'ValidationError') {
       return error(res, Object.values(err.errors)[0].message, 422);
     }
-    return error(res, 'Failed to create listing', 500);
+    throw err;
   }
 };
 
@@ -641,379 +441,249 @@ exports.updateListing = async (req, res) => {
     return success(res, { listing: decorateListingImages(updated) }, 'Listing updated successfully');
   } catch (err) {
     destroyCloudinaryImages({ files: req.files }, req.requestId);
-    logger.error(`[${req.requestId}] updateListing: ${err.message}`, err);
     if (err.name === 'ValidationError') {
       return error(res, Object.values(err.errors)[0].message, 422);
     }
-    return error(res, 'Failed to update listing', 500);
+    throw err;
   }
 };
 
 // ─── DELETE /api/v1/listings/:id ──────────────────────────────────────────────
 exports.deleteListing = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
 
-    const listing = await Listing.findById(req.params.id).select('+imageMetadata');
-    if (!listing)                                                               return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') return error(res, 'Not authorised', 403);
+  const listing = await Listing.findById(req.params.id).select('+imageMetadata');
+  if (!listing)                                                               return error(res, 'Listing not found', 404);
+  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') return error(res, 'Not authorised', 403);
 
-    await Promise.all([
-      listing.deleteOne(),
-      User.findByIdAndUpdate(listing.seller, { $inc: { listingCount: -1 } }),
-    ]);
+  await Promise.all([
+    listing.deleteOne(),
+    User.findByIdAndUpdate(listing.seller, { $inc: { listingCount: -1 } }),
+  ]);
 
-    destroyCloudinaryImages(listing, req.requestId);
+  destroyCloudinaryImages(listing, req.requestId);
 
-    await flushPublicListingCaches();
-    return success(res, null, 'Listing deleted successfully');
-  } catch (err) {
-    logger.error(`[${req.requestId}] deleteListing: ${err.message}`, err);
-    return error(res, 'Failed to delete listing', 500);
-  }
-};
-
-// ─── POST /api/v1/listings/:id/save ──────────────────────────────────────────
-exports.deleteListingImage = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
-
-    const listing = await Listing.findById(req.params.id).select('+imageMetadata');
-    if (!listing) return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
-      return error(res, 'Not authorised', 403);
-    }
-    if ((listing.images || []).length <= 1) {
-      return error(res, 'A listing must keep at least one image', 400);
-    }
-
-    const imageIndex = findImageIndex(listing, req.body);
-    if (imageIndex < 0) return error(res, 'Image not found on this listing', 404);
-
-    const deletedUrl = listing.images[imageIndex];
-    const deletedMetadata = listing.imageMetadata?.[imageIndex];
-
-    listing.images.splice(imageIndex, 1);
-    if (Array.isArray(listing.imageMetadata) && listing.imageMetadata.length > imageIndex) {
-      listing.imageMetadata.splice(imageIndex, 1);
-    }
-
-    if (listing.coverImageIndex === imageIndex) {
-      listing.coverImageIndex = 0;
-    } else if (listing.coverImageIndex > imageIndex) {
-      listing.coverImageIndex -= 1;
-    }
-    listing.coverImageIndex = Math.min(
-      Math.max(listing.coverImageIndex || 0, 0),
-      listing.images.length - 1
-    );
-
-    await listing.save();
-    destroyCloudinaryImages({
-      images: deletedUrl ? [deletedUrl] : [],
-      imageMetadata: deletedMetadata ? [deletedMetadata] : [],
-    }, req.requestId);
-
-    await flushPublicListingCaches();
-
-    return success(res, { listing: decorateListingImages(listing) }, 'Image deleted successfully');
-  } catch (err) {
-    logger.error(`[${req.requestId}] deleteListingImage: ${err.message}`, err);
-    return error(res, 'Failed to delete listing image', 500);
-  }
-};
-
-exports.reorderListingImages = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
-
-    const listing = await Listing.findById(req.params.id).select('+imageMetadata');
-    if (!listing) return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
-      return error(res, 'Not authorised', 403);
-    }
-
-    const requestedImages = req.body.images;
-    const currentImages = listing.images || [];
-    if (requestedImages.length !== currentImages.length) {
-      return error(res, 'Reorder request must include every current image exactly once', 422);
-    }
-
-    const currentSet = new Set(currentImages);
-    const requestedSet = new Set(requestedImages);
-    if (currentSet.size !== requestedSet.size || requestedImages.some(url => !currentSet.has(url))) {
-      return error(res, 'Reorder request contains unknown or duplicate images', 422);
-    }
-
-    const metadataByUrl = new Map();
-    (listing.imageMetadata || []).forEach((metadata, index) => {
-      const currentUrl = currentImages[index];
-      if (currentUrl) metadataByUrl.set(currentUrl, metadata);
-      if (metadata.url) metadataByUrl.set(metadata.url, metadata);
-      if (metadata.secureUrl) metadataByUrl.set(metadata.secureUrl, metadata);
-    });
-
-    const coverImageIndex = parseCoverImageIndex(
-      req.body.coverImageIndex,
-      requestedImages.length,
-      listing.coverImageIndex
-    );
-    if (coverImageIndex === null) return error(res, 'Cover image index is invalid', 422);
-
-    listing.images = requestedImages;
-    listing.imageMetadata = requestedImages
-      .map(url => metadataByUrl.get(url))
-      .filter(Boolean);
-    listing.coverImageIndex = coverImageIndex;
-
-    await listing.save();
-    await flushPublicListingCaches();
-
-    return success(res, { listing: decorateListingImages(listing) }, 'Images reordered successfully');
-  } catch (err) {
-    logger.error(`[${req.requestId}] reorderListingImages: ${err.message}`, err);
-    return error(res, 'Failed to reorder listing images', 500);
-  }
+  await flushPublicListingCaches();
+  return success(res, null, 'Listing deleted successfully');
 };
 
 exports.updateListingStatus = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
 
-    const listing = await Listing.findById(req.params.id);
-    if (!listing) return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
-      return error(res, 'Not authorised', 403);
-    }
-
-    listing.status = req.body.status;
-    listing.isSold = req.body.status === 'sold';
-    listing.isActive = !['hidden', 'expired'].includes(req.body.status);
-    await listing.save();
-
-    if (req.body.status === 'sold') {
-      await User.findByIdAndUpdate(listing.seller, { $inc: { soldCount: 1 } });
-    }
-
-    await flushPublicListingCaches();
-    return success(res, { listing: decorateListingImages(listing) }, 'Listing status updated');
-  } catch (err) {
-    logger.error(`[${req.requestId}] updateListingStatus: ${err.message}`, err);
-    return error(res, 'Failed to update listing status', 500);
+  const listing = await Listing.findById(req.params.id);
+  if (!listing) return error(res, 'Listing not found', 404);
+  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+    return error(res, 'Not authorised', 403);
   }
+
+  listing.status = req.body.status;
+  listing.isSold = req.body.status === 'sold';
+  listing.isActive = !['hidden', 'expired'].includes(req.body.status);
+  await listing.save();
+
+  if (req.body.status === 'sold') {
+    await User.findByIdAndUpdate(listing.seller, { $inc: { soldCount: 1 } });
+  }
+
+  await flushPublicListingCaches();
+  return success(res, { listing: decorateListingImages(listing) }, 'Listing status updated');
 };
 
 exports.renewListing = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
 
-    const listing = await Listing.findById(req.params.id);
-    if (!listing) return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
-      return error(res, 'Not authorised', 403);
-    }
-    if (listing.status === 'sold') return error(res, 'Sold listings cannot be renewed', 400);
-
-    listing.expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
-    listing.status = 'available';
-    listing.isActive = true;
-    await listing.save();
-
-    await flushPublicListingCaches();
-    return success(res, { listing: decorateListingImages(listing) }, 'Listing renewed');
-  } catch (err) {
-    logger.error(`[${req.requestId}] renewListing: ${err.message}`, err);
-    return error(res, 'Failed to renew listing', 500);
+  const listing = await Listing.findById(req.params.id);
+  if (!listing) return error(res, 'Listing not found', 404);
+  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+    return error(res, 'Not authorised', 403);
   }
+  if (listing.status === 'sold') return error(res, 'Sold listings cannot be renewed', 400);
+
+  listing.expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+  listing.status = 'available';
+  listing.isActive = true;
+  await listing.save();
+
+  await flushPublicListingCaches();
+  return success(res, { listing: decorateListingImages(listing) }, 'Listing renewed');
 };
 
 exports.toggleSaveListing = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
-    const listingId = req.params.id;
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  const listingId = req.params.id;
 
-    const [exists, user] = await Promise.all([
-      Listing.exists({ _id: listingId, isActive: true }),
-      User.findById(req.userId).select('wishlist').lean(),
+  const [exists, user] = await Promise.all([
+    Listing.exists({ _id: listingId, isActive: true }),
+    User.findById(req.userId).select('wishlist').lean(),
+  ]);
+  if (!exists) return error(res, 'Listing not found', 404);
+
+  const isSaved = user.wishlist.some(id => id.toString() === listingId);
+
+  if (isSaved) {
+    await Promise.all([
+      User.findByIdAndUpdate(req.userId,    { $pull:    { wishlist: listingId } }),
+      Listing.findByIdAndUpdate(listingId,  { $pull:    { savedBy: req.userId } }),
     ]);
-    if (!exists) return error(res, 'Listing not found', 404);
-
-    const isSaved = user.wishlist.some(id => id.toString() === listingId);
-
-    if (isSaved) {
-      await Promise.all([
-        User.findByIdAndUpdate(req.userId,    { $pull:    { wishlist: listingId } }),
-        Listing.findByIdAndUpdate(listingId,  { $pull:    { savedBy: req.userId } }),
-      ]);
-      return success(res, { saved: false }, 'Removed from wishlist');
-    } else {
-      await Promise.all([
-        User.findByIdAndUpdate(req.userId,    { $addToSet: { wishlist: listingId } }),
-        Listing.findByIdAndUpdate(listingId,  { $addToSet: { savedBy: req.userId } }),
-      ]);
-      return success(res, { saved: true }, 'Saved to wishlist');
-    }
-  } catch (err) {
-    logger.error(`[${req.requestId}] toggleSaveListing: ${err.message}`, err);
-    return error(res, 'Failed to update wishlist', 500);
+    return success(res, { saved: false }, 'Removed from wishlist');
+  } else {
+    await Promise.all([
+      User.findByIdAndUpdate(req.userId,    { $addToSet: { wishlist: listingId } }),
+      Listing.findByIdAndUpdate(listingId,  { $addToSet: { savedBy: req.userId } }),
+    ]);
+    return success(res, { saved: true }, 'Saved to wishlist');
   }
 };
 
-// ─── GET /api/v1/listings/saved/me ───────────────────────────────────────────
 exports.getSavedListings = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const skip = (page - 1) * limit;
 
-    const user = await User.findById(req.userId)
-      .select('wishlist')
-      .lean();
+  const user = await User.findById(req.userId)
+    .select('wishlist')
+    .lean();
 
-    const wishlistIds = user?.wishlist || [];
-    const [rawListings, total] = await Promise.all([
-      Listing.find({ _id: { $in: wishlistIds }, isActive: true })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .select('title price type category condition images coverImageIndex seller college location createdAt')
-        .populate('seller', 'name avatar initials college rating isVerified')
-        .lean(),
-      Listing.countDocuments({ _id: { $in: wishlistIds }, isActive: true }),
-    ]);
+  const wishlistIds = user?.wishlist || [];
+  const [rawListings, total] = await Promise.all([
+    Listing.find({ _id: { $in: wishlistIds }, isActive: true })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('title price type category condition images coverImageIndex seller college location createdAt')
+      .populate('seller', 'name avatar initials college rating isVerified')
+      .lean(),
+    Listing.countDocuments({ _id: { $in: wishlistIds }, isActive: true }),
+  ]);
 
-    return success(res, {
-      listings: rawListings.map(decorateListingImages),
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasMore: page * limit < total,
-      },
-    });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getSavedListings: ${err.message}`, err);
-    return error(res, 'Failed to fetch wishlist', 500);
-  }
+  return success(res, {
+    listings: rawListings.map(decorateListingImages),
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+    },
+  });
 };
 
-// ─── GET /api/v1/listings/mine/me ─────────────────────────────────────────────
 exports.getMyListings = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const skip = (page - 1) * limit;
 
-    const [rawListings, total] = await Promise.all([
-      Listing.find({ seller: req.userId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Listing.countDocuments({ seller: req.userId }),
-    ]);
+  const [rawListings, total] = await Promise.all([
+    Listing.find({ seller: req.userId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Listing.countDocuments({ seller: req.userId }),
+  ]);
 
-    const now = Date.now();
-    const listings = rawListings.map(l => decorateListingImages({
-      ...l,
-      daysUntilExpiry: l.expiresAt
-        ? Math.max(0, Math.ceil((new Date(l.expiresAt).getTime() - now) / 86400000))
-        : 0,
-    }));
+  const now = Date.now();
+  const listings = rawListings.map(l => decorateListingImages({
+    ...l,
+    daysUntilExpiry: l.expiresAt
+      ? Math.max(0, Math.ceil((new Date(l.expiresAt).getTime() - now) / 86400000))
+      : 0,
+  }));
 
-    return success(res, {
-      listings,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasMore: page * limit < total,
-      },
-    });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getMyListings: ${err.message}`, err);
-    return error(res, 'Failed to fetch your listings', 500);
-  }
+  return success(res, {
+    listings,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+    },
+  });
 };
 
-// ─── POST /api/v1/listings/:id/report ────────────────────────────────────────
 exports.reportListing = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
-    const { reason, details } = req.body;
+  if (!isValidId(req.params.id)) return error(res, 'Invalid listing ID', 400);
+  const { reason, details } = req.body;
 
-    const listing = await Listing.findById(req.params.id);
-    if (!listing) return error(res, 'Listing not found', 404);
-    if (listing.seller.toString() === req.userId) {
-      return error(res, 'You cannot report your own listing', 400);
-    }
+  const listing = await Listing.findById(req.params.id);
+  if (!listing) return error(res, 'Listing not found', 404);
+  if (listing.seller.toString() === req.userId) {
+    return error(res, 'You cannot report your own listing', 400);
+  }
 
-    const existingReport = await Report.findOne({
+  const existingReport = await Report.findOne({
+    listing: listing._id,
+    reporter: req.userId,
+  }).lean();
+  if (existingReport) return error(res, 'You have already reported this listing', 409);
+
+  const [reportCount] = await Promise.all([
+    Report.countDocuments({ listing: listing._id }),
+    Report.create({
       listing: listing._id,
       reporter: req.userId,
-    }).lean();
-    if (existingReport) return error(res, 'You have already reported this listing', 409);
+      reason,
+      details: (details || '').trim(),
+    }),
+  ]);
 
-    const [reportCount] = await Promise.all([
-      Report.countDocuments({ listing: listing._id }),
-      Report.create({
-        listing: listing._id,
-        reporter: req.userId,
-        reason,
-        details: (details || '').trim(),
-      }),
-    ]);
+  const admins = await User.find({ role: 'admin' }).select('_id').lean();
+  if (admins.length > 0) {
+    const adminNotifications = await Notification.insertMany(
+      admins.map(a => ({
+        user: a._id,
+        type: 'report',
+        text: `Listing "${listing.title}" was reported for ${reason}.`,
+        link: `/admin/listing-reports?listing=${listing._id}`,
+      }))
+    );
+    try {
+      const io = getIO();
+      adminNotifications.forEach(notification => {
+        io.to(`user_${notification.user}`).emit('new_notification', { notification });
+      });
+    } catch (socketErr) {
+      logger.warn(`[${req.requestId}] Admin report socket emit failed: ${socketErr.message}`);
+    }
+  }
 
-    const admins = await User.find({ role: 'admin' }).select('_id').lean();
+  // Auto-flag after 3 unique reports
+  if (reportCount >= 2 && !listing.flagged) {
+    listing.flagged = true;
+    await listing.save();
+
     if (admins.length > 0) {
-      const adminNotifications = await Notification.insertMany(
+      const autoFlagNotifications = await Notification.insertMany(
         admins.map(a => ({
           user: a._id,
-          type: 'report',
-          text: `Listing "${listing.title}" was reported for ${reason}.`,
-          link: `/admin/listing-reports?listing=${listing._id}`,
+          type: 'system',
+          text: `Listing "${listing.title}" has been auto-flagged after 3 reports.`,
+          link: `/admin/listings/${listing._id}`,
         }))
       );
       try {
         const io = getIO();
-        adminNotifications.forEach(notification => {
+        autoFlagNotifications.forEach(notification => {
           io.to(`user_${notification.user}`).emit('new_notification', { notification });
         });
       } catch (socketErr) {
-        logger.warn(`[${req.requestId}] Admin report socket emit failed: ${socketErr.message}`);
+        logger.warn(`[${req.requestId}] Auto-flag socket emit failed: ${socketErr.message}`);
       }
     }
-
-    // Auto-flag after 3 unique reports
-    if (reportCount >= 2 && !listing.flagged) {
-      listing.flagged = true;
-      await listing.save();
-
-      if (admins.length > 0) {
-        const autoFlagNotifications = await Notification.insertMany(
-          admins.map(a => ({
-            user: a._id,
-            type: 'system',
-            text: `Listing "${listing.title}" has been auto-flagged after 3 reports.`,
-            link: `/admin/listings/${listing._id}`,
-          }))
-        );
-        try {
-          const io = getIO();
-          autoFlagNotifications.forEach(notification => {
-            io.to(`user_${notification.user}`).emit('new_notification', { notification });
-          });
-        } catch (socketErr) {
-          logger.warn(`[${req.requestId}] Auto-flag socket emit failed: ${socketErr.message}`);
-        }
-      }
-    }
-
-    return success(res, null, 'Listing reported successfully');
-  } catch (err) {
-    logger.error(`[${req.requestId}] reportListing: ${err.message}`, err);
-    return error(res, 'Failed to report listing', 500);
   }
+
+  return success(res, null, 'Listing reported successfully');
 };
+
+// Exports for split controllers
+exports.isValidId = isValidId;
+exports.normalizeTags = normalizeTags;
+exports.parseBoolean = parseBoolean;
+exports.destroyCloudinaryImages = destroyCloudinaryImages;
+exports.flushPublicListingCaches = flushPublicListingCaches;
+exports.decorateListingImages = decorateListingImages;
+exports.getCampusScope = getCampusScope;
+exports.APPROVED_MODERATION_FILTER = APPROVED_MODERATION_FILTER;
+exports.parseCoverImageIndex = parseCoverImageIndex;
+exports.findImageIndex = findImageIndex;

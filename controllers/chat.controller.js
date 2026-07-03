@@ -68,26 +68,25 @@ const notifyAdmins = async ({ text, link }) => {
 
 // ─── GET /chat/conversations ──────────────────────────────────────────────────
 exports.getConversations = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const skip = (page - 1) * limit;
 
-    const conversations = await Conversation.find({ participants: req.userId })
-      .populate('participants', 'name avatar initials isVerified')
-      .populate('listing',      'title price images isActive')
-      .sort({ lastMessageAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+  const conversations = await Conversation.find({ participants: req.userId })
+    .populate('participants', 'name avatar initials isVerified')
+    .populate('listing',      'title price images isActive')
+    .sort({ lastMessageAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
 
-    const conversationIds = conversations.map(c => c._id);
-    const otherUserIds = conversations
-      .map(conversation => getOtherParticipantId(conversation, req.userId))
-      .filter(Boolean);
+  const conversationIds = conversations.map(c => c._id);
+  const otherUserIds = conversations
+    .map(conversation => getOtherParticipantId(conversation, req.userId))
+    .filter(Boolean);
 
-    const [unreadCounts, blocks] = await Promise.all([
-      Message.aggregate([
+  const [unreadCounts, blocks, total] = await Promise.all([
+    Message.aggregate([
       {
         $match: {
           conversation: { $in: conversationIds },
@@ -96,62 +95,52 @@ exports.getConversations = async (req, res) => {
         },
       },
       { $group: { _id: '$conversation', count: { $sum: 1 } } },
-      ]),
-      UserBlock.find({
-        $or: [
-          { blocker: req.userId, blocked: { $in: otherUserIds } },
-          { blocker: { $in: otherUserIds }, blocked: req.userId },
-        ],
-      }).lean(),
-    ]);
-    const unreadByConversation = new Map(
-      unreadCounts.map(item => [item._id.toString(), item.count])
-    );
-    const blockedUserIds = new Set(blocks.flatMap(block => [
-      block.blocker.toString(),
-      block.blocked.toString(),
-    ]).filter(id => id !== req.userId));
+    ]),
+    UserBlock.find({
+      $or: [
+        { blocker: req.userId, blocked: { $in: otherUserIds } },
+        { blocker: { $in: otherUserIds }, blocked: req.userId },
+      ],
+    }).lean(),
+    Conversation.countDocuments({ participants: req.userId }),
+  ]);
+  const unreadByConversation = new Map(
+    unreadCounts.map(item => [item._id.toString(), item.count])
+  );
+  const blockedUserIds = new Set(blocks.flatMap(block => [
+    block.blocker.toString(),
+    block.blocked.toString(),
+  ]).filter(id => id !== req.userId));
 
-    const total = await Conversation.countDocuments({ participants: req.userId });
-
-    return success(res, {
-      conversations: conversations.map(conversation => ({
-        ...conversation,
-        isBlocked: blockedUserIds.has(String(getOtherParticipantId(conversation, req.userId))),
-        unreadCount: unreadByConversation.get(conversation._id.toString()) || 0,
-      })),
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasMore: page * limit < total,
-      },
-    });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getConversations: ${err.message}`, err);
-    return error(res, 'Failed to fetch conversations', 500);
-  }
+  return success(res, {
+    conversations: conversations.map(conversation => ({
+      ...conversation,
+      isBlocked: blockedUserIds.has(String(getOtherParticipantId(conversation, req.userId))),
+      unreadCount: unreadByConversation.get(conversation._id.toString()) || 0,
+    })),
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+    },
+  });
 };
 
 exports.getUnreadCount = async (req, res) => {
-  try {
-    const conversations = await Conversation.find({ participants: req.userId })
-      .select('_id')
-      .lean();
-    const conversationIds = conversations.map(c => c._id);
+  const conversations = await Conversation.find({ participants: req.userId })
+    .select('_id')
+    .lean();
+  const conversationIds = conversations.map(c => c._id);
 
-    const unreadCount = await Message.countDocuments({
-      conversation: { $in: conversationIds },
-      sender: { $ne: req.userId },
-      read: false,
-    });
+  const unreadCount = await Message.countDocuments({
+    conversation: { $in: conversationIds },
+    sender: { $ne: req.userId },
+    read: false,
+  });
 
-    return success(res, { unreadCount });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getUnreadCount: ${err.message}`, err);
-    return error(res, 'Failed to fetch unread count', 500);
-  }
+  return success(res, { unreadCount });
 };
 
 // ─── POST /chat/conversations ─────────────────────────────────────────────────
@@ -181,7 +170,6 @@ exports.createOrGetConversation = async (req, res) => {
       return error(res, 'Conversation is unavailable', 403);
     }
 
-    // Sort participants for a consistent unique key
     const participants = [req.userId, sellerId].sort();
 
     let conversation = await Conversation.findOne({
@@ -201,8 +189,6 @@ exports.createOrGetConversation = async (req, res) => {
 
     return success(res, { conversation }, 'Conversation ready');
   } catch (err) {
-    logger.error(`[${req.requestId}] createOrGetConversation: ${err.message}`, err);
-    // Duplicate-key on the unique index is fine — just fetch it
     if (err.code === 11000) {
       try {
         const conv = await Conversation.findOne({
@@ -214,150 +200,132 @@ exports.createOrGetConversation = async (req, res) => {
         if (conv) return success(res, { conversation: conv }, 'Conversation ready');
       } catch { /* fall through */ }
     }
-    return error(res, 'Failed to create conversation', 500);
+    throw err;
   }
 };
 
 // ─── GET /chat/conversations/:id/messages ────────────────────────────────────
 exports.getMessages = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid conversation ID', 400);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid conversation ID', 400);
 
-    const conversation = await Conversation.findById(req.params.id)
-      .populate('participants', 'name avatar initials isVerified')
-      .populate('listing', 'title price images isActive')
-      .lean();
-    if (!conversation) return error(res, 'Conversation not found', 404);
+  const conversation = await Conversation.findById(req.params.id)
+    .populate('participants', 'name avatar initials isVerified')
+    .populate('listing', 'title price images isActive')
+    .lean();
+  if (!conversation) return error(res, 'Conversation not found', 404);
 
-    // Security: only participants can read messages
-    if (!isParticipant(conversation, req.userId)) return error(res, 'Access denied', 403);
+  if (!isParticipant(conversation, req.userId)) return error(res, 'Access denied', 403);
 
-    const { page = 1, limit = 50 } = req.query;
-    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
-    const skip = (Math.max(1, parseInt(page, 10)) - 1) * parsedLimit;
+  const { page = 1, limit = 50 } = req.query;
+  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+  const skip = (Math.max(1, parseInt(page, 10)) - 1) * parsedLimit;
 
-    const [messages, total] = await Promise.all([
-      Message.find({ conversation: req.params.id, hiddenByAdmin: { $ne: true } })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parsedLimit)
-        .populate('sender', 'name avatar initials')
-        .lean(),
-      Message.countDocuments({ conversation: req.params.id, hiddenByAdmin: { $ne: true } }),
-    ]);
+  const [messages, total] = await Promise.all([
+    Message.find({ conversation: req.params.id, hiddenByAdmin: { $ne: true } })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parsedLimit)
+      .populate('sender', 'name avatar initials')
+      .lean(),
+    Message.countDocuments({ conversation: req.params.id, hiddenByAdmin: { $ne: true } }),
+  ]);
 
-    // Mark messages from the other person as read
-    await Message.updateMany(
-      { conversation: req.params.id, sender: { $ne: req.userId }, read: false },
-      { $set: { read: true } }
-    );
+  await Message.updateMany(
+    { conversation: req.params.id, sender: { $ne: req.userId }, read: false },
+    { $set: { read: true } }
+  );
 
-    const currentPage = Math.max(1, parseInt(page, 10) || 1);
-    return success(res, {
-      messages: messages.reverse(),
+  const currentPage = Math.max(1, parseInt(page, 10) || 1);
+  return success(res, {
+    messages: messages.reverse(),
+    total,
+    conversation,
+    pagination: {
       total,
-      conversation,
-      pagination: {
-        total,
-        page: currentPage,
-        limit: parsedLimit,
-        totalPages: Math.ceil(total / parsedLimit),
-        hasMore: currentPage * parsedLimit < total,
-      },
-    });
-  } catch (err) {
-    logger.error(`[${req.requestId}] getMessages: ${err.message}`, err);
-    return error(res, 'Failed to fetch messages', 500);
-  }
+      page: currentPage,
+      limit: parsedLimit,
+      totalPages: Math.ceil(total / parsedLimit),
+      hasMore: currentPage * parsedLimit < total,
+    },
+  });
 };
 
 // ─── POST /chat/conversations/:id/messages ────────────────────────────────────
 exports.sendMessage = async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) return error(res, 'Invalid conversation ID', 400);
+  if (!isValidId(req.params.id)) return error(res, 'Invalid conversation ID', 400);
 
-    const { text } = req.body;
-    const safeText = (text || '').trim().slice(0, 1000);
-    if (!safeText) return error(res, 'Message text is required', 400);
+  const { text } = req.body;
+  const safeText = (text || '').trim().slice(0, 1000);
+  if (!safeText) return error(res, 'Message text is required', 400);
 
-    const conversation = await Conversation.findById(req.params.id);
-    if (!conversation) return error(res, 'Conversation not found', 404);
+  const conversation = await Conversation.findById(req.params.id);
+  if (!conversation) return error(res, 'Conversation not found', 404);
 
-    // Security: only participants can send
-    if (!isParticipant(conversation, req.userId)) return error(res, 'Access denied', 403);
+  if (!isParticipant(conversation, req.userId)) return error(res, 'Access denied', 403);
 
-    const receiverId = getOtherParticipantId(conversation, req.userId);
-    if (!receiverId) return error(res, 'Conversation is invalid', 400);
-    if (await hasBlockBetween(req.userId, receiverId)) {
-      return error(res, 'Message cannot be sent to this user', 403);
-    }
-
-    // Create message + update conversation in parallel
-    const [message] = await Promise.all([
-      Message.create({ conversation: req.params.id, sender: req.userId, text: safeText }),
-      Conversation.findByIdAndUpdate(req.params.id, {
-        lastMessage:   safeText.slice(0, 100),
-        lastMessageAt: new Date(),
-      }),
-    ]);
-
-    await message.populate('sender', 'name avatar initials');
-
-    // Create Notification document for the receiver
-    let notification;
-    try {
-      notification = await Notification.create({
-        user: receiverId,
-        type: 'message',
-        text: `New message from ${message.sender.name}`,
-        link: `/messages/${req.params.id}`,
-      });
-    } catch (notifErr) {
-      logger.error(`[${req.requestId}] Message notification creation failed: ${notifErr.message}`);
-    }
-
-    // Emit real-time events (non-blocking)
-    try {
-      const io = getIO();
-      io.to(`conv_${req.params.id}`).emit('new_message', {
-        message,
-        sender: req.userId,
-      });
-      io.to(`user_${receiverId}`).emit('new_message', {
-        message,
-        sender: req.userId,
-      });
-      if (notification) {
-        io.to(`user_${receiverId}`).emit('new_notification', { notification });
-      }
-    } catch (socketErr) {
-      // Socket errors must never break the REST response
-      logger.warn(`[${req.requestId}] Socket emit failed: ${socketErr.message}`);
-    }
-
-    // Send push notification to receiver
-    try {
-      const receiver = await User.findById(receiverId);
-      if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
-        const preferences = receiver.notificationPreferences || {};
-        await sendPushNotification(receiver, {
-          title: `New message from ${message.sender.name}`,
-          body: preferences.messagePreview ? safeText : 'Tap to view the message.',
-          url: `${process.env.FRONTEND_URL}/messages/${req.params.id}`,
-          tag: `message-${req.params.id}`,
-          type: 'message',
-          preferenceKey: 'messages',
-        });
-      }
-    } catch (pushErr) {
-      logger.warn(`[${req.requestId}] Push notify failed: ${pushErr.message}`);
-    }
-
-    return success(res, { message }, 'Message sent', 201);
-  } catch (err) {
-    logger.error(`[${req.requestId}] sendMessage: ${err.message}`, err);
-    return error(res, 'Failed to send message', 500);
+  const receiverId = getOtherParticipantId(conversation, req.userId);
+  if (!receiverId) return error(res, 'Conversation is invalid', 400);
+  if (await hasBlockBetween(req.userId, receiverId)) {
+    return error(res, 'Message cannot be sent to this user', 403);
   }
+
+  const [message] = await Promise.all([
+    Message.create({ conversation: req.params.id, sender: req.userId, text: safeText }),
+    Conversation.findByIdAndUpdate(req.params.id, {
+      lastMessage:   safeText.slice(0, 100),
+      lastMessageAt: new Date(),
+    }),
+  ]);
+
+  await message.populate('sender', 'name avatar initials');
+
+  let notification;
+  try {
+    notification = await Notification.create({
+      user: receiverId,
+      type: 'message',
+      text: `New message from ${message.sender.name}`,
+      link: `/messages/${req.params.id}`,
+    });
+  } catch (notifErr) {
+    logger.error(`Message notification creation failed: ${notifErr.message}`);
+  }
+
+  try {
+    const io = getIO();
+    io.to(`conv_${req.params.id}`).emit('new_message', {
+      message,
+      sender: req.userId,
+    });
+    io.to(`user_${receiverId}`).emit('new_message', {
+      message,
+      sender: req.userId,
+    });
+    if (notification) {
+      io.to(`user_${receiverId}`).emit('new_notification', { notification });
+    }
+  } catch (socketErr) {
+    logger.warn(`Socket emit failed: ${socketErr.message}`);
+  }
+
+  try {
+    const receiver = await User.findById(receiverId);
+    if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
+      const preferences = receiver.notificationPreferences || {};
+      await sendPushNotification(receiver, {
+        title: `New message from ${message.sender.name}`,
+        body: preferences.messagePreview ? safeText : 'Tap to view the message.',
+        url: `${process.env.FRONTEND_URL}/messages/${req.params.id}`,
+        tag: `message-${req.params.id}`,
+        type: 'message',
+        preferenceKey: 'messages',
+      });
+    }
+  } catch (pushErr) {
+    logger.warn(`Push notify failed: ${pushErr.message}`);
+  }
+
+  return success(res, { message }, 'Message sent', 201);
 };
 
 exports.reportMessage = async (req, res) => {
@@ -397,7 +365,6 @@ exports.reportMessage = async (req, res) => {
     return success(res, null, 'Message reported successfully', 201);
   } catch (err) {
     if (err.code === 11000) return error(res, 'You have already reported this message', 409);
-    logger.error(`[${req.requestId}] reportMessage: ${err.message}`, err);
-    return error(res, 'Failed to report message', 500);
+    throw err;
   }
 };

@@ -302,7 +302,7 @@ if (cluster.isPrimary && shouldUseCluster) {
         : err.message || "Internal server error";
     if (status >= 500) {
       logger.error(
-        `[${req.requestId || "system"}] Global Error: ${err.message}`,
+        `[${req.requestId || "system"}] Global Error on ${req.method} ${req.originalUrl}: ${err.message}`,
         err,
       );
     }

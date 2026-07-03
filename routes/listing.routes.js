@@ -2,6 +2,10 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const listingController = require('../controllers/listing.controller');
+const listingSearchController = require('../controllers/listingSearch.controller');
+const savedSearchController = require('../controllers/savedSearch.controller');
+const listingImagesController = require('../controllers/listingImages.controller');
+const asyncHandler = require('../middleware/asyncHandler');
 const { protect, optionalAuth } = require('../middleware/auth.middleware');
 const {
   upload,
@@ -16,7 +20,7 @@ const router = express.Router();
 
 // ── Public routes ─────────────────────────────────────────────────────────────
 // IMPORTANT: specific paths MUST come before /:id
-router.get('/search/suggestions', listingController.getSearchSuggestions);
+router.get('/search/suggestions', asyncHandler(listingSearchController.getSearchSuggestions));
 router.get('/saved-searches/me',
   protect,
   [
@@ -24,7 +28,7 @@ router.get('/saved-searches/me',
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  listingController.getSavedSearches
+  asyncHandler(savedSearchController.getSavedSearches)
 );
 router.get('/saved/me',
   protect,
@@ -33,7 +37,7 @@ router.get('/saved/me',
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  listingController.getSavedListings
+  asyncHandler(listingController.getSavedListings)
 );
 router.get('/mine/me',
   protect,
@@ -42,7 +46,7 @@ router.get('/mine/me',
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  listingController.getMyListings
+  asyncHandler(listingController.getMyListings)
 );
 
 router.post('/saved-searches',
@@ -60,14 +64,14 @@ router.post('/saved-searches',
     body('alertsEnabled').optional().isBoolean(),
   ],
   validate,
-  listingController.createSavedSearch
+  asyncHandler(savedSearchController.createSavedSearch)
 );
 
 router.delete('/saved-searches/:id',
   protect,
   [param('id').isMongoId().withMessage('Invalid saved search ID')],
   validate,
-  listingController.deleteSavedSearch
+  asyncHandler(savedSearchController.deleteSavedSearch)
 );
 
 router.get('/',
@@ -87,10 +91,10 @@ router.get('/',
     query('tags').optional(),
   ],
   validate,
-  listingController.getListings
+  asyncHandler(listingSearchController.getListings)
 );
 
-router.get('/:id', optionalAuth, listingController.getListingById);
+router.get('/:id', optionalAuth, asyncHandler(listingController.getListingById));
 
 // ── Protected routes ──────────────────────────────────────────────────────────
 router.post('/',
@@ -119,7 +123,7 @@ router.post('/',
     body('coverImageIndex').optional().isInt({ min: 0, max: 2 }).withMessage('Cover image index must be 0-2'),
   ],
   validate,
-  listingController.createListing
+  asyncHandler(listingController.createListing)
 );
 
 router.put('/:id',
@@ -147,7 +151,7 @@ router.put('/:id',
     body('coverImageIndex').optional().isInt({ min: 0, max: 2 }).withMessage('Cover image index must be 0-2'),
   ],
   validate,
-  listingController.updateListing
+  asyncHandler(listingController.updateListing)
 );
 
 router.delete('/:id/images',
@@ -163,7 +167,7 @@ router.delete('/:id/images',
     }),
   ],
   validate,
-  listingController.deleteListingImage
+  asyncHandler(listingImagesController.deleteListingImage)
 );
 
 router.patch('/:id/images/reorder',
@@ -174,7 +178,7 @@ router.patch('/:id/images/reorder',
     body('coverImageIndex').optional().isInt({ min: 0, max: 2 }).withMessage('Cover image index must be 0-2'),
   ],
   validate,
-  listingController.reorderListingImages
+  asyncHandler(listingImagesController.reorderListingImages)
 );
 
 router.patch('/:id/status',
@@ -184,18 +188,18 @@ router.patch('/:id/status',
     body('status').isIn(['available', 'reserved', 'sold', 'hidden']).withMessage('Invalid status'),
   ],
   validate,
-  listingController.updateListingStatus
+  asyncHandler(listingController.updateListingStatus)
 );
 
 router.post('/:id/renew',
   protect,
   [param('id').isMongoId().withMessage('Invalid listing ID')],
   validate,
-  listingController.renewListing
+  asyncHandler(listingController.renewListing)
 );
 
-router.delete('/:id', protect, listingController.deleteListing);
-router.post('/:id/save', protect, listingController.toggleSaveListing);
+router.delete('/:id', protect, asyncHandler(listingController.deleteListing));
+router.post('/:id/save', protect, asyncHandler(listingController.toggleSaveListing));
 
 router.post('/:id/report', 
   protect,
@@ -205,7 +209,7 @@ router.post('/:id/report',
     body('details').optional().trim().isLength({ max: 500 }).withMessage('Details must be at most 500 characters'),
   ],
   validate,
-  listingController.reportListing
+  asyncHandler(listingController.reportListing)
 );
 
 module.exports = router;

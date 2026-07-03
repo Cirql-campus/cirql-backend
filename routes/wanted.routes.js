@@ -3,6 +3,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const wantedController = require('../controllers/wanted.controller');
+const asyncHandler = require('../middleware/asyncHandler');
 const { protect } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { wantedLimiter } = require('../middleware/rateLimit.middleware');
@@ -18,7 +19,7 @@ router.get('/',
     query('limit').optional().isInt({ min: 1, max: 30 }).withMessage('Limit must be 1-30'),
   ],
   validate,
-  wantedController.getWantedRequests
+  asyncHandler(wantedController.getWantedRequests)
 );
 
 router.get('/mine',
@@ -28,7 +29,7 @@ router.get('/mine',
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
   ],
   validate,
-  wantedController.getMyWantedRequests
+  asyncHandler(wantedController.getMyWantedRequests)
 );
 
 router.post('/',
@@ -48,7 +49,7 @@ router.post('/',
     body('urgency').optional().isIn(['anytime', 'this_week', 'urgent']).withMessage('Invalid urgency'),
   ],
   validate,
-  wantedController.createWantedRequest
+  asyncHandler(wantedController.createWantedRequest)
 );
 
 router.post('/:id/respond',
@@ -58,7 +59,7 @@ router.post('/:id/respond',
     body('message').optional().trim().isLength({ max: 1000 }).withMessage('Message too long'),
   ],
   validate,
-  wantedController.respondToWantedRequest
+  asyncHandler(wantedController.respondToWantedRequest)
 );
 
 router.patch('/:id/status',
@@ -67,13 +68,13 @@ router.patch('/:id/status',
     body('status').isIn(['open', 'fulfilled', 'closed']).withMessage('Invalid status'),
   ],
   validate,
-  wantedController.updateWantedStatus
+  asyncHandler(wantedController.updateWantedStatus)
 );
 
 router.delete('/:id',
   [param('id').isMongoId().withMessage('Invalid wanted item ID')],
   validate,
-  wantedController.deleteWantedRequest
+  asyncHandler(wantedController.deleteWantedRequest)
 );
 
 module.exports = router;

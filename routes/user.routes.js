@@ -2,17 +2,18 @@
 const express = require('express');
 const { body } = require('express-validator');
 const userController = require('../controllers/user.controller');
+const asyncHandler = require('../middleware/asyncHandler');
 const { protect } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { reportLimiter } = require('../middleware/rateLimit.middleware');
 
 const router = express.Router();
 
-router.get('/me', protect, userController.getMe);
-router.post('/push/subscribe', protect, userController.subscribeToPush);
-router.delete('/push/subscribe', protect, userController.unsubscribeFromPush);
-router.patch('/notification-preferences', protect, userController.updateNotificationPreferences);
-router.get('/blocked', protect, userController.getBlockedUsers);
+router.get('/me', protect, asyncHandler(userController.getMe));
+router.post('/push/subscribe', protect, asyncHandler(userController.subscribeToPush));
+router.delete('/push/subscribe', protect, asyncHandler(userController.unsubscribeFromPush));
+router.patch('/notification-preferences', protect, asyncHandler(userController.updateNotificationPreferences));
+router.get('/blocked', protect, asyncHandler(userController.getBlockedUsers));
 
 router.put('/me',
   protect,
@@ -21,11 +22,11 @@ router.put('/me',
     body('avatar').optional().isURL().withMessage('Avatar must be a valid URL'),
   ],
   validate,
-  userController.updateProfile
+  asyncHandler(userController.updateProfile)
 );
 
-router.get('/:id', userController.getUserProfile);
-router.get('/:id/reviews', userController.getReviews);
+router.get('/:id', asyncHandler(userController.getUserProfile));
+router.get('/:id/reviews', asyncHandler(userController.getReviews));
 
 router.post('/:id/block',
   protect,
@@ -33,10 +34,10 @@ router.post('/:id/block',
     body('reason').optional().trim().isLength({ max: 300 }).withMessage('Reason must be at most 300 characters'),
   ],
   validate,
-  userController.blockUser
+  asyncHandler(userController.blockUser)
 );
 
-router.delete('/:id/block', protect, userController.unblockUser);
+router.delete('/:id/block', protect, asyncHandler(userController.unblockUser));
 
 router.post('/:id/report',
   protect,
@@ -46,7 +47,7 @@ router.post('/:id/report',
     body('details').optional().trim().isLength({ max: 500 }).withMessage('Details must be at most 500 characters'),
   ],
   validate,
-  userController.reportUser
+  asyncHandler(userController.reportUser)
 );
 
 router.post('/:id/review',
@@ -57,7 +58,7 @@ router.post('/:id/review',
     body('listingId').optional().isMongoId().withMessage('Invalid listing ID'),
   ],
   validate,
-  userController.reviewUser
+  asyncHandler(userController.reviewUser)
 );
 
 module.exports = router;
