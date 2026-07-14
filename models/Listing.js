@@ -146,10 +146,10 @@ const listingSchema = new mongoose.Schema({
     ref:  'User',
   }],
 
-  // TTL: auto-expire listings after 60 days
+  // TTL: auto-expire listings after 180 days
   expiresAt: {
     type:    Date,
-    default: () => new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+    default: () => new Date(Date.now() + 180 * 24 * 60 * 60 * 1000),
   },
 }, {
   timestamps: true,
