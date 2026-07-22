@@ -28,11 +28,12 @@ exports.getCategories = async (req, res) => {
 // ─── GET /api/v1/categories/:slug ─────────────────────────────────────────────
 exports.getCategoryBySlug = async (req, res) => {
   const { slug } = req.params;
-  if (!req.user?.college && req.user?.role !== 'admin') {
+  if (!req.user?.college && req.user?.role !== 'super_admin' && req.user?.role !== 'college_admin') {
     return error(res, 'Your account is missing a campus. Please contact support.', 403);
   }
 
-  const campusScope = req.user.role === 'admin' ? 'admin' : `college:${req.user.college}`;
+  const isGlobalAdmin = req.user.role === 'super_admin';
+  const campusScope = isGlobalAdmin ? 'admin' : `college:${req.user.college}`;
   const cacheKey = `categories:slug:${slug}:${campusScope}`;
 
   const cached = categoryCache.get(cacheKey);
@@ -51,7 +52,7 @@ exports.getCategoryBySlug = async (req, res) => {
     moderationStatus: APPROVED_MODERATION_FILTER,
     status: { $in: ['available', 'reserved', null] },
   };
-  if (req.user.role !== 'admin') listingFilter.college = req.user.college;
+  if (!isGlobalAdmin) listingFilter.college = req.user.college;
 
   const featuredListings = await Listing.find(listingFilter)
     .sort({ views: -1, createdAt: -1 })

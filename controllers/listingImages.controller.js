@@ -15,7 +15,8 @@ exports.deleteListingImage = async (req, res) => {
 
   const listing = await Listing.findById(req.params.id).select('+imageMetadata');
   if (!listing) return error(res, 'Listing not found', 404);
-  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === listing.college);
+  if (listing.seller.toString() !== req.userId && !isAdmin) {
     return error(res, 'Not authorised', 403);
   }
   if ((listing.images || []).length <= 1) {
@@ -59,7 +60,8 @@ exports.reorderListingImages = async (req, res) => {
 
   const listing = await Listing.findById(req.params.id).select('+imageMetadata');
   if (!listing) return error(res, 'Listing not found', 404);
-  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === listing.college);
+  if (listing.seller.toString() !== req.userId && !isAdmin) {
     return error(res, 'Not authorised', 403);
   }
 

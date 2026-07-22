@@ -22,7 +22,7 @@ const idToString = (value) => (value?._id || value)?.toString?.();
 
 const getCampusScope = (req) => {
   if (!req.user) return null;
-  if (req.user.role === 'admin') return { isAdmin: true };
+  if (req.user.role === 'super_admin' || req.user.role === 'college_admin') return { isAdmin: true };
   return {
     isAdmin: false,
     college: String(req.user.college || '').trim(),
@@ -31,7 +31,7 @@ const getCampusScope = (req) => {
 
 const isPublicListingVisibleToUser = (listing, user) => {
   if (!listing || !user) return false;
-  if (user.role === 'admin') return true;
+  if (user.role === 'super_admin' || user.role === 'college_admin') return true;
   if (idToString(listing.seller) === idToString(user)) return true;
   return Boolean(
     listing.isActive &&
@@ -454,7 +454,8 @@ exports.deleteListing = async (req, res) => {
 
   const listing = await Listing.findById(req.params.id).select('+imageMetadata');
   if (!listing)                                                               return error(res, 'Listing not found', 404);
-  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') return error(res, 'Not authorised', 403);
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === listing.college);
+  if (listing.seller.toString() !== req.userId && !isAdmin) return error(res, 'Not authorised', 403);
 
   await Promise.all([
     listing.deleteOne(),
@@ -472,7 +473,8 @@ exports.updateListingStatus = async (req, res) => {
 
   const listing = await Listing.findById(req.params.id);
   if (!listing) return error(res, 'Listing not found', 404);
-  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === listing.college);
+  if (listing.seller.toString() !== req.userId && !isAdmin) {
     return error(res, 'Not authorised', 403);
   }
 
@@ -494,7 +496,8 @@ exports.renewListing = async (req, res) => {
 
   const listing = await Listing.findById(req.params.id);
   if (!listing) return error(res, 'Listing not found', 404);
-  if (listing.seller.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === listing.college);
+  if (listing.seller.toString() !== req.userId && !isAdmin) {
     return error(res, 'Not authorised', 403);
   }
   if (listing.status === 'sold') return error(res, 'Sold listings cannot be renewed', 400);
@@ -628,7 +631,7 @@ exports.reportListing = async (req, res) => {
     }),
   ]);
 
-  const admins = await User.find({ role: 'admin' }).select('_id').lean();
+  const admins = await User.find({ role: { $in: ['super_admin', 'college_admin'] } }).select('_id').lean();
   if (admins.length > 0) {
     const adminNotifications = await Notification.insertMany(
       admins.map(a => ({

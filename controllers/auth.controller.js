@@ -9,7 +9,7 @@ const { isCollegeEmail, detectCollege } = require("../utils/collegeDetect");
 const { sendOTPEmail, sendResetEmail } = require("../utils/email");
 const logger = require("../utils/logger");
 const { buildCookieOptions } = require("../utils/cookieOptions");
-const { isAdminEmail } = require("../utils/adminEmails");
+const { isSuperAdminEmail } = require("../utils/adminEmails");
 
 const normalizeEmail = (email) =>
   String(email || "")
@@ -98,7 +98,7 @@ exports.register = async (req, res) => {
       }
       user.name = name.trim();
       user.password = password; // pre-save hook re-hashes
-      if (isAdminEmail(emailLower)) user.role = "admin";
+      if (isSuperAdminEmail(emailLower)) user.role = "super_admin";
     } else {
       const info = detectCollege(emailLower);
       user = new User({
@@ -107,7 +107,7 @@ exports.register = async (req, res) => {
         password,
         college: info?.college || "University Campus",
         collegeDomain: info?.domain || emailLower.split("@")[1],
-        role: isAdminEmail(emailLower) ? "admin" : "user",
+        role: isSuperAdminEmail(emailLower) ? "super_admin" : "user",
       });
     }
 
@@ -231,8 +231,8 @@ exports.login = async (req, res) => {
     return error(res, "Invalid email or password", 401);
   }
 
-  if (isAdminEmail(emailLower) && user.role !== "admin") {
-    user.role = "admin";
+  if (isSuperAdminEmail(emailLower) && user.role !== "super_admin") {
+    user.role = "super_admin";
     await user.save();
   }
 

@@ -29,15 +29,15 @@ const run = async () => {
     throw new Error(`User with email "${normalizedEmail}" not found.`);
   }
 
-  if (user.role === 'admin') {
-    logger.info(`User "${normalizedEmail}" is already an admin.`);
+  if (user.role === 'super_admin') {
+    logger.info(`User "${normalizedEmail}" is already a super admin.`);
     return;
   }
 
-  user.role = 'admin';
+  user.role = 'super_admin';
   await user.save();
 
-  logger.info(`Successfully promoted user "${normalizedEmail}" to admin!`);
+  logger.info(`Successfully promoted user "${normalizedEmail}" to super admin!`);
 };
 
 run()

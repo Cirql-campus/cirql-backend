@@ -122,7 +122,8 @@ exports.updateWantedStatus = async (req, res) => {
 
   const wanted = await WantedRequest.findById(req.params.id);
   if (!wanted) return error(res, 'Wanted item not found', 404);
-  if (wanted.requester.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === wanted.college);
+  if (wanted.requester.toString() !== req.userId && !isAdmin) {
     return error(res, 'Access denied', 403);
   }
 
@@ -138,7 +139,8 @@ exports.deleteWantedRequest = async (req, res) => {
 
   const wanted = await WantedRequest.findById(req.params.id);
   if (!wanted) return error(res, 'Wanted item not found', 404);
-  if (wanted.requester.toString() !== req.userId && req.user?.role !== 'admin') {
+  const isAdmin = req.user?.role === 'super_admin' || (req.user?.role === 'college_admin' && req.user.adminCollege === wanted.college);
+  if (wanted.requester.toString() !== req.userId && !isAdmin) {
     return error(res, 'Access denied', 403);
   }
 

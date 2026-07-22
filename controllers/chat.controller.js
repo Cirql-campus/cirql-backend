@@ -37,7 +37,7 @@ const hasBlockBetween = async (userA, userB) => {
 
 const canStartConversationForListing = (listing, user) => {
   if (!listing || !user) return false;
-  if (user.role === 'admin') return true;
+  if (user.role === 'super_admin' || user.role === 'college_admin') return true;
   return Boolean(
     listing.college &&
     listing.college === user.college &&
@@ -47,7 +47,7 @@ const canStartConversationForListing = (listing, user) => {
 };
 
 const notifyAdmins = async ({ text, link }) => {
-  const admins = await User.find({ role: 'admin' }).select('_id').lean();
+  const admins = await User.find({ role: { $in: ['super_admin', 'college_admin'] } }).select('_id').lean();
   if (admins.length === 0) return;
   const notifications = await Notification.insertMany(admins.map(adminUser => ({
     user: adminUser._id,

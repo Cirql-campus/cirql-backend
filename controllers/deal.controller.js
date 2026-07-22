@@ -123,7 +123,7 @@ exports.getDealById = async (req, res) => {
 
   const deal = await populateDeal(Deal.findById(req.params.id)).lean();
   if (!deal) return error(res, 'Deal not found', 404);
-  if (!ensureParticipant(deal, req.userId) && req.user?.role !== 'admin') {
+  if (!ensureParticipant(deal, req.userId) && req.user?.role !== 'super_admin' && req.user?.role !== 'college_admin') {
     return error(res, 'Access denied', 403);
   }
 
@@ -137,7 +137,7 @@ exports.updateDealStatus = async (req, res) => {
 
   const deal = await Deal.findById(req.params.id);
   if (!deal) return error(res, 'Deal not found', 404);
-  if (!ensureParticipant(deal, req.userId) && req.user?.role !== 'admin') {
+  if (!ensureParticipant(deal, req.userId) && req.user?.role !== 'super_admin' && req.user?.role !== 'college_admin') {
     return error(res, 'Access denied', 403);
   }
 
@@ -147,7 +147,7 @@ exports.updateDealStatus = async (req, res) => {
   if (!listing) return error(res, 'Listing not found', 404);
 
   if (action === 'accept') {
-    if (!isSeller && req.user?.role !== 'admin') return error(res, 'Only the seller can accept', 403);
+    if (!isSeller && req.user?.role !== 'super_admin' && req.user?.role !== 'college_admin') return error(res, 'Only the seller can accept', 403);
     if (deal.status !== 'requested') return error(res, 'Only requested deals can be accepted', 400);
     deal.status = 'accepted';
     deal.acceptedAt = new Date();
@@ -160,7 +160,7 @@ exports.updateDealStatus = async (req, res) => {
       link: `/deals/${deal._id}`,
     });
   } else if (action === 'reject') {
-    if (!isSeller && req.user?.role !== 'admin') return error(res, 'Only the seller can reject', 403);
+    if (!isSeller && req.user?.role !== 'super_admin' && req.user?.role !== 'college_admin') return error(res, 'Only the seller can reject', 403);
     if (deal.status !== 'requested') return error(res, 'Only requested deals can be rejected', 400);
     deal.status = 'rejected';
     deal.rejectedAt = new Date();
@@ -184,7 +184,7 @@ exports.updateDealStatus = async (req, res) => {
   } else if (action === 'complete') {
     if (deal.status !== 'accepted') return error(res, 'Only accepted deals can be completed', 400);
     if (isBuyer) deal.buyerCompletedAt = deal.buyerCompletedAt || new Date();
-    if (isSeller || req.user?.role === 'admin') deal.sellerCompletedAt = deal.sellerCompletedAt || new Date();
+    if (isSeller || req.user?.role === 'super_admin' || req.user?.role === 'college_admin') deal.sellerCompletedAt = deal.sellerCompletedAt || new Date();
     deal.statusNote = note;
 
     if (deal.buyerCompletedAt && deal.sellerCompletedAt) {
