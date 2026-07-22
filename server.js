@@ -81,7 +81,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   const { assignRequestId } = require("./middleware/requestId.middleware");
   const requestTimeout = require("./middleware/requestTimeout.middleware");
   const { protect } = require("./middleware/auth.middleware");
-  const { admin } = require("./middleware/admin.middleware");
+  const { anyAdmin, scopeCollege } = require("./middleware/admin.middleware");
   const {
     csrfProtect,
     csrfTokenRoute,
@@ -282,7 +282,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   app.use("/api/v1/deals", dealRoutes);
   app.use("/api/v1/wanted", wantedRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
-  app.use("/api/v1/admin", protect, admin, adminRoutes);
+  app.use("/api/v1/admin", protect, anyAdmin, scopeCollege, adminRoutes);
   app.use("/api/v1/categories", categoryRoutes);
 
   // ── 404 ────────────────────────────────────────────────────────────────────

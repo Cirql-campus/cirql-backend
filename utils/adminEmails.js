@@ -18,4 +18,6 @@ const isAdminEmail = (email) =>
   BUILT_IN_ADMIN_EMAILS.has(normalizeEmail(email)) ||
   getConfiguredAdminEmails().includes(normalizeEmail(email));
 
-module.exports = { isAdminEmail };
+// Export separately for use in auth middleware
+const isSuperAdminEmail = isAdminEmail; // same logic, renamed for clarity
+module.exports = { isAdminEmail, isSuperAdminEmail };

@@ -62,7 +62,16 @@ const userSchema = new mongoose.Schema({
     ref:  'Listing',
   }],
 
-  role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  role: {
+    type: String,
+    enum: ['user', 'college_admin', 'super_admin'],
+    default: 'user',
+  },
+  adminCollege: {
+    type: String,
+    default: null,
+    trim: true,
+  },
 
   // Account lockout
   failedLoginAttempts: { type: Number, default: 0, select: false },
@@ -93,6 +102,7 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ collegeDomain: 1 });
 userSchema.index({ isVerified: 1 });
 userSchema.index({ role: 1 });
+userSchema.index({ role: 1, adminCollege: 1 });
 userSchema.index({ createdAt: -1 });
 
 // ── Pre-save hooks ────────────────────────────────────────────────────────────
@@ -143,6 +153,7 @@ userSchema.methods.toPublicJSON = function () {
     initials:      this.initials,
     avatar:        this.avatar,
     role:          this.role,
+    adminCollege:  this.adminCollege,
     isVerified:    this.isVerified,
     rating:        this.rating,
     reviewCount:   this.reviewCount,

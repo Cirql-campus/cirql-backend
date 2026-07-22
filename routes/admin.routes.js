@@ -4,14 +4,46 @@ const { body, param, query } = require('express-validator');
 const adminController = require('../controllers/admin.controller');
 const asyncHandler    = require('../middleware/asyncHandler');
 const { validate }    = require('../middleware/validate.middleware');
+const { superAdmin }  = require('../middleware/admin.middleware');
 
 const router = express.Router();
 
-// All routes here are already protected by protect + admin middleware in server.js
+// All routes here are already protected by protect + anyAdmin + scopeCollege middleware in server.js
+// Any route specifically needing superAdmin privileges applies the superAdmin middleware explicitly.
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 router.get('/stats', asyncHandler(adminController.getStats));
 router.get('/dashboard', asyncHandler(adminController.getDashboard));
+
+// ─── Super Admin specific stats and audit logs ────────────────────────────────
+router.get('/super-stats', superAdmin, asyncHandler(adminController.getSuperStats));
+router.get('/audit-log',
+  superAdmin,
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('limit must be 1-100'),
+  ],
+  validate,
+  asyncHandler(adminController.getAuditLog)
+);
+
+// ─── College Admins management (Super Admin Only) ──────────────────────────────
+router.get('/college-admins', superAdmin, asyncHandler(adminController.getCollegeAdmins));
+router.post('/college-admins',
+  superAdmin,
+  [
+    body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+    body('college').trim().isLength({ min: 2, max: 100 }).withMessage('College name required'),
+  ],
+  validate,
+  asyncHandler(adminController.promoteCollegeAdmin)
+);
+router.delete('/college-admins/:id',
+  superAdmin,
+  [param('id').isMongoId().withMessage('Invalid user ID')],
+  validate,
+  asyncHandler(adminController.dismissCollegeAdmin)
+);
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
 router.get(
@@ -108,6 +140,18 @@ router.delete(
   asyncHandler(adminController.deleteListing)
 );
 
+// Bulk action on listings (Approve / Reject / Delete)
+router.post(
+  '/listings/bulk-action',
+  [
+    body('ids').isArray({ min: 1, max: 10 }).withMessage('ids must be an array of 1 to 10 listing IDs'),
+    body('ids.*').isMongoId().withMessage('Invalid listing ID format'),
+    body('action').isIn(['delete', 'approve', 'reject']).withMessage('Invalid action'),
+  ],
+  validate,
+  asyncHandler(adminController.bulkActionListings)
+);
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 router.get(
   '/user-reports',
@@ -153,6 +197,17 @@ router.put(
   [param('id').isMongoId().withMessage('Invalid user ID')],
   validate,
   asyncHandler(adminController.unbanUser)
+);
+
+// Broadcast Notification
+router.post(
+  '/notify-college',
+  [
+    body('text').trim().isLength({ min: 1, max: 200 }).withMessage('Text must be 1 to 200 characters'),
+    body('link').optional().trim().isLength({ max: 200 }).withMessage('Link too long'),
+  ],
+  validate,
+  asyncHandler(adminController.notifyCollege)
 );
 
 module.exports = router;
