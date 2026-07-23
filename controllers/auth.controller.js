@@ -233,7 +233,11 @@ exports.login = async (req, res) => {
 
   if (isSuperAdminEmail(emailLower) && user.role !== "super_admin") {
     user.role = "super_admin";
-    await user.save();
+    try {
+      await User.updateOne({ _id: user._id }, { $set: { role: "super_admin" } });
+    } catch (saveErr) {
+      logger.error("Failed to persist super_admin role:", saveErr.message);
+    }
   }
 
   await User.updateOne(

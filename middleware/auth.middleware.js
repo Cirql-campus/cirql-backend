@@ -39,7 +39,7 @@ const protect = async (req, res, next) => {
   if (isSuperAdminEmail(user.email) && user.role !== 'super_admin') {
     user.role = 'super_admin';
     try {
-      await user.save();
+      await User.updateOne({ _id: user._id }, { $set: { role: 'super_admin' } });
     } catch (saveErr) {
       // Log but don't crash the request — role will be correct in memory for this session
       console.error('[AUTH] Failed to persist super_admin role:', saveErr.message);
@@ -65,7 +65,7 @@ const optionalAuth = async (req, _res, next) => {
       if (isSuperAdminEmail(user.email) && user.role !== 'super_admin') {
         user.role = 'super_admin';
         try {
-          await user.save();
+          await User.updateOne({ _id: user._id }, { $set: { role: 'super_admin' } });
         } catch (saveErr) {
           console.error('[AUTH] Failed to persist super_admin role:', saveErr.message);
         }
