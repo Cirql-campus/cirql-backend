@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const College = require("../models/College");
 const RefreshToken = require("../models/RefreshToken");
 const { success, error } = require("../utils/apiResponse");
 const { isCollegeEmail, detectCollege } = require("../utils/collegeDetect");
@@ -80,7 +81,13 @@ exports.register = async (req, res) => {
     const emailLower = normalizeEmail(email);
 
     logger.debug(`[${req.requestId}] Register attempt for ${emailLower}`);
-    if (!isCollegeEmail(emailLower)) {
+    const domain = emailLower.split('@')[1];
+    const dbCollege = await College.findOne({ domain, isActive: true });
+
+    let isAllowed = isCollegeEmail(emailLower);
+    if (dbCollege) isAllowed = true;
+
+    if (!isAllowed) {
       return error(
         res,
         "Only college email addresses are allowed (.edu / .ac.in)",
@@ -100,13 +107,16 @@ exports.register = async (req, res) => {
       user.password = password; // pre-save hook re-hashes
       if (isSuperAdminEmail(emailLower)) user.role = "super_admin";
     } else {
-      const info = detectCollege(emailLower);
+      let info = detectCollege(emailLower);
+      if (!info && dbCollege) {
+        info = { college: dbCollege.name, domain: dbCollege.domain };
+      }
       user = new User({
         name: name.trim(),
         email: emailLower,
         password,
         college: info?.college || "University Campus",
-        collegeDomain: info?.domain || emailLower.split("@")[1],
+        collegeDomain: info?.domain || domain,
         role: isSuperAdminEmail(emailLower) ? "super_admin" : "user",
       });
     }

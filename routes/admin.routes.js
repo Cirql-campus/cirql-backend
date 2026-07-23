@@ -45,6 +45,17 @@ router.delete('/college-admins/:id',
   asyncHandler(adminController.dismissCollegeAdmin)
 );
 
+// ─── Colleges CRUD (Super Admin Only) ──────────────────────────────────────────
+router.post('/colleges',
+  superAdmin,
+  [
+    body('name').trim().isLength({ min: 2, max: 100 }).withMessage('College name must be 2 to 100 characters'),
+    body('domain').trim().isLength({ min: 2, max: 50 }).withMessage('Domain must be 2 to 50 characters'),
+  ],
+  validate,
+  asyncHandler(adminController.createCollege)
+);
+
 // ─── Listings ─────────────────────────────────────────────────────────────────
 router.get(
   '/listing-reports',

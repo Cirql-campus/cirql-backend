@@ -623,7 +623,8 @@ exports.dismissCollegeAdmin = async (req, res) => {
 
 // GET /api/v1/admin/super-stats — cross-college overview (super_admin only)
 exports.getSuperStats = async (req, res) => {
-  const [collegeStats, collegeAdmins] = await Promise.all([
+  const College = require('../models/College');
+  const [collegeStats, collegeAdmins, dbColleges] = await Promise.all([
     Listing.aggregate([
       { $group: {
         _id: '$college',
@@ -631,9 +632,9 @@ exports.getSuperStats = async (req, res) => {
         activeListings: { $sum: { $cond: ['$isActive', 1, 0] } },
         flaggedListings: { $sum: { $cond: ['$flagged', 1, 0] } },
       }},
-      { $sort: { totalListings: -1 } },
     ]),
     User.find({ role: 'college_admin' }).select('email adminCollege').lean(),
+    College.find({ isActive: true }).lean(),
   ]);
 
   // Merge listings stats with user stats by college name
@@ -642,17 +643,91 @@ exports.getSuperStats = async (req, res) => {
       .map(r => [r._id, r.count])
   );
 
-  const result = collegeStats.map(c => ({
-    college: c._id,
-    totalUsers: usersByCollege[c._id] || 0,
-    totalListings: c.totalListings,
-    activeListings: c.activeListings,
-    flaggedListings: c.flaggedListings,
-    hasAdmin: collegeAdmins.some(a => a.adminCollege === c._id),
-    adminEmail: collegeAdmins.find(a => a.adminCollege === c._id)?.email || null,
-  }));
+  const collegesMap = new Map();
+
+  // 1. Populate map with defined colleges from database
+  for (const c of dbColleges) {
+    collegesMap.set(c.name, {
+      college: c.name,
+      totalUsers: usersByCollege[c.name] || 0,
+      totalListings: 0,
+      activeListings: 0,
+      flaggedListings: 0,
+      hasAdmin: collegeAdmins.some(a => a.adminCollege === c.name),
+      adminEmail: collegeAdmins.find(a => a.adminCollege === c.name)?.email || null,
+    });
+  }
+
+  // 2. Populate/merge colleges currently found in Listings
+  for (const c of collegeStats) {
+    if (!c._id) continue;
+    const name = c._id;
+    if (collegesMap.has(name)) {
+      const existing = collegesMap.get(name);
+      existing.totalListings = c.totalListings;
+      existing.activeListings = c.activeListings;
+      existing.flaggedListings = c.flaggedListings;
+    } else {
+      collegesMap.set(name, {
+        college: name,
+        totalUsers: usersByCollege[name] || 0,
+        totalListings: c.totalListings,
+        activeListings: c.activeListings,
+        flaggedListings: c.flaggedListings,
+        hasAdmin: collegeAdmins.some(a => a.adminCollege === name),
+        adminEmail: collegeAdmins.find(a => a.adminCollege === name)?.email || null,
+      });
+    }
+  }
+
+  const result = Array.from(collegesMap.values()).sort(
+    (a, b) => b.totalListings - a.totalListings || a.college.localeCompare(b.college)
+  );
 
   return success(res, { colleges: result });
+};
+
+// POST /api/v1/admin/colleges — Add a new college (super_admin only)
+exports.createCollege = async (req, res) => {
+  const College = require('../models/College');
+  const { name, domain } = req.body;
+  if (!name || !domain) {
+    return error(res, 'College name and domain are required', 400);
+  }
+
+  const cleanName = name.trim();
+  const cleanDomain = domain.toLowerCase().trim();
+
+  // Validate domain format (e.g. kiet.edu)
+  if (!/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(cleanDomain)) {
+    return error(res, 'Please enter a valid email domain (e.g. kiet.edu)', 400);
+  }
+
+  const existing = await College.findOne({
+    $or: [{ name: cleanName }, { domain: cleanDomain }],
+  });
+  if (existing) {
+    return error(res, 'A college with this name or email domain already exists', 400);
+  }
+
+  const college = await College.create({
+    name: cleanName,
+    domain: cleanDomain,
+  });
+
+  // Log action
+  const { logAdminAction } = require('../utils/audit');
+  await logAdminAction({
+    adminId: req.userId,
+    adminEmail: req.user.email,
+    adminCollege: req.user.adminCollege,
+    action: 'CREATE_COLLEGE',
+    targetType: 'College',
+    targetId: college._id.toString(),
+    details: `Added new college: ${cleanName} (${cleanDomain})`,
+  });
+
+  return success(res, { college }, 'College created successfully', 201);
 };
 
 // GET /api/v1/admin/audit-log — show all admin actions (super_admin only)
