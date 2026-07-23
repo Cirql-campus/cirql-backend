@@ -38,7 +38,12 @@ const protect = async (req, res, next) => {
 
   if (isSuperAdminEmail(user.email) && user.role !== 'super_admin') {
     user.role = 'super_admin';
-    await user.save();
+    try {
+      await user.save();
+    } catch (saveErr) {
+      // Log but don't crash the request — role will be correct in memory for this session
+      console.error('[AUTH] Failed to persist super_admin role:', saveErr.message);
+    }
   }
 
   req.userId = user._id.toString();
@@ -59,7 +64,11 @@ const optionalAuth = async (req, _res, next) => {
     if (user && user.tokenVersion === (decoded.tv ?? 0)) {
       if (isSuperAdminEmail(user.email) && user.role !== 'super_admin') {
         user.role = 'super_admin';
-        await user.save();
+        try {
+          await user.save();
+        } catch (saveErr) {
+          console.error('[AUTH] Failed to persist super_admin role:', saveErr.message);
+        }
       }
       req.userId = user._id.toString();
       req.user   = user;
