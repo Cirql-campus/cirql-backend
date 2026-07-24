@@ -61,6 +61,7 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref:  'Listing',
   }],
+  agreedToTermsAt: { type: Date, default: null },
 
   role: {
     type: String,
@@ -165,6 +166,7 @@ userSchema.methods.toPublicJSON = function () {
       ...(this.notificationPreferences?.toObject?.() || this.notificationPreferences || {}),
     },
     pushSubscriptionCount: this.pushSubscriptions?.length || 0,
+    agreedToTermsAt: this.agreedToTermsAt,
     createdAt:     this.createdAt,
   };
 };

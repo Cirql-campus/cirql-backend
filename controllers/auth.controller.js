@@ -77,7 +77,7 @@ const issueTokens = async (user, res) => {
 // ─── Register ─────────────────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, agreedToTerms } = req.body;
     const emailLower = normalizeEmail(email);
 
     logger.debug(`[${req.requestId}] Register attempt for ${emailLower}`);
@@ -95,6 +95,14 @@ exports.register = async (req, res) => {
       );
     }
 
+    if (!agreedToTerms) {
+      return error(
+        res,
+        "You must agree to the Terms & Conditions and Privacy Policy to create an account",
+        400,
+      );
+    }
+
     let user = await User.findOne({ email: emailLower }).select(
       "+verifyOTPHash +verifyOTPExpiry +otpAttempts",
     );
@@ -105,6 +113,7 @@ exports.register = async (req, res) => {
       }
       user.name = name.trim();
       user.password = password; // pre-save hook re-hashes
+      user.agreedToTermsAt = new Date();
       if (isSuperAdminEmail(emailLower)) user.role = "super_admin";
     } else {
       let info = detectCollege(emailLower);
@@ -118,6 +127,7 @@ exports.register = async (req, res) => {
         college: info?.college || "University Campus",
         collegeDomain: info?.domain || domain,
         role: isSuperAdminEmail(emailLower) ? "super_admin" : "user",
+        agreedToTermsAt: new Date(),
       });
     }
 

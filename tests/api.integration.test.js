@@ -75,7 +75,7 @@ const registerVerifiedUser = async ({ name, email }) => {
 
   const registerRes = await agent
     .post('/api/v1/auth/register')
-    .send({ name, email, password: TEST_PASSWORD })
+    .send({ name, email, password: TEST_PASSWORD, agreedToTerms: true })
     .expect(201);
 
   expect(registerRes.body.success).toBe(true);
@@ -269,6 +269,7 @@ describe('CirQl production integration flows', () => {
           name: 'Cross Site Cookie Student',
           email,
           password: TEST_PASSWORD,
+          agreedToTerms: true,
         })
         .expect(201);
 
@@ -301,6 +302,22 @@ describe('CirQl production integration flows', () => {
     }
   });
 
+  test('register fails if agreedToTerms is missing or false', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        name: 'Consent Fail Student',
+        email: 'consent-fail@kiet.edu',
+        password: TEST_PASSWORD,
+      })
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      success: false,
+      message: 'You must agree to the Terms & Conditions and Privacy Policy to create an account',
+    });
+  });
+
   test('register reports OTP email delivery failure instead of silently succeeding', async () => {
     sendOTPEmail.mockRejectedValueOnce(new Error('ENOTFOUND smtp.example'));
 
@@ -310,6 +327,7 @@ describe('CirQl production integration flows', () => {
         name: 'Mail Failure Student',
         email: 'mail-failure@kiet.edu',
         password: TEST_PASSWORD,
+        agreedToTerms: true,
       })
       .expect(503);
 
@@ -328,6 +346,7 @@ describe('CirQl production integration flows', () => {
         name: 'Database Verify Student',
         email,
         password: TEST_PASSWORD,
+        agreedToTerms: true,
       })
       .expect(201);
 
