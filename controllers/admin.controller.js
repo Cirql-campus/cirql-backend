@@ -648,6 +648,7 @@ exports.getSuperStats = async (req, res) => {
   // 1. Populate map with defined colleges from database
   for (const c of dbColleges) {
     collegesMap.set(c.name, {
+      id: c._id.toString(),
       college: c.name,
       totalUsers: usersByCollege[c.name] || 0,
       totalListings: 0,
@@ -716,18 +717,24 @@ exports.createCollege = async (req, res) => {
   });
 
   // Log action
-  const { logAdminAction } = require('../utils/audit');
-  await logAdminAction({
-    adminId: req.userId,
-    adminEmail: req.user.email,
-    adminCollege: req.user.adminCollege,
-    action: 'CREATE_COLLEGE',
-    targetType: 'College',
-    targetId: college._id.toString(),
-    details: `Added new college: ${cleanName} (${cleanDomain})`,
-  });
+  await logAdminAction(req, 'CREATE_COLLEGE', 'College', college._id, `Added new college: ${cleanName} (${cleanDomain})`);
 
   return success(res, { college }, 'College created successfully', 201);
+};
+
+// DELETE /api/v1/admin/colleges/:id — Remove a college (super_admin only)
+exports.deleteCollege = async (req, res) => {
+  const College = require('../models/College');
+  const college = await College.findById(req.params.id);
+  if (!college) return error(res, 'College not found', 404);
+
+  // Soft/hard delete - we hard delete the college document
+  await College.findByIdAndDelete(req.params.id);
+
+  // Log action
+  await logAdminAction(req, 'DELETE_COLLEGE', 'College', college._id, `Deleted college: ${college.name} (${college.domain})`);
+
+  return success(res, null, 'College removed successfully');
 };
 
 // GET /api/v1/admin/audit-log — show all admin actions (super_admin only)

@@ -55,6 +55,12 @@ router.post('/colleges',
   validate,
   asyncHandler(adminController.createCollege)
 );
+router.delete('/colleges/:id',
+  superAdmin,
+  [param('id').isMongoId().withMessage('Invalid college ID')],
+  validate,
+  asyncHandler(adminController.deleteCollege)
+);
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
 router.get(
