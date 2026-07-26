@@ -105,6 +105,7 @@ if (cluster.isPrimary && shouldUseCluster) {
 
   // ── Socket.io (with cluster adapter) ──────────────────────────────────────
   const io = initSocket(server);
+  app.set('io', io);
   if (shouldUseCluster) {
     const { setupWorker } = require("@socket.io/sticky");
     setupWorker(io);

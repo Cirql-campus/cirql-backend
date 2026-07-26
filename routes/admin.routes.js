@@ -17,6 +17,7 @@ router.get('/dashboard', asyncHandler(adminController.getDashboard));
 
 // ─── Super Admin specific stats and audit logs ────────────────────────────────
 router.get('/super-stats', superAdmin, asyncHandler(adminController.getSuperStats));
+router.get('/health', superAdmin, asyncHandler(adminController.getHealth));
 router.get('/audit-log',
   superAdmin,
   [

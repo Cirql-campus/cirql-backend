@@ -875,8 +875,10 @@ exports.notifyCollege = async (req, res) => {
   if (lastBroadcast) return error(res, 'You can only send one broadcast per 24 hours', 429);
 
   // Find users in scope
-  const uf = collegeUserFilter(req.collegeScope);
-  const users = await User.find({ ...uf, role: 'user' }).select('_id');
+  const userFilter = (req.body.scope === 'all' && req.user.role === 'super_admin')
+    ? { role: 'user' }
+    : { role: 'user', college: req.collegeScope };
+  const users = await User.find(userFilter).select('_id').lean();
   if (users.length === 0) {
     return success(res, null, 'No users to notify');
   }
@@ -896,8 +898,39 @@ exports.notifyCollege = async (req, res) => {
     'broadcast_notification',
     null,
     null,
-    `Broadcasted message to ${req.collegeScope || 'all colleges'}: "${text}"`
+    `Broadcasted message to ${req.body.scope === 'all' ? 'all colleges' : (req.collegeScope || 'own college')}: "${text}"`
   );
 
   return success(res, null, `Broadcast sent to ${users.length} users`);
+};
+
+// GET /api/v1/admin/health — live platform health stats (super_admin only)
+exports.getHealth = async (req, res) => {
+  const start = Date.now();
+  let dbStatus = 'ok';
+  let dbResponseMs = 0;
+
+  try {
+    // Ping MongoDB
+    await mongoose.connection.db.admin().ping();
+    dbResponseMs = Date.now() - start;
+    if (dbResponseMs > 500) dbStatus = 'slow';
+  } catch {
+    dbStatus = 'error';
+    dbResponseMs = Date.now() - start;
+  }
+
+  const memUsage = process.memoryUsage();
+  const io = req.app.get('io'); // assumes io is stored on app
+
+  return success(res, {
+    dbStatus,
+    dbResponseMs,
+    uptimeSeconds: Math.floor(process.uptime()),
+    memoryUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+    memoryTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
+    activeSockets: io ? io.engine.clientsCount : 0,
+    requestsLastHour: 0,  // placeholder
+    errorsLastHour: 0,    // placeholder
+  });
 };
