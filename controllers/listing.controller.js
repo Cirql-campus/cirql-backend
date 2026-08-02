@@ -47,7 +47,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'title', 'description', 'price', 'category',
   'type', 'condition', 'location', 'pickupLocation', 'isActive',
   'isNegotiable', 'originalPrice', 'quantity', 'rentDuration', 'brand',
-  'model', 'tags',
+  'model', 'tags', 'deposit', 'availableFrom', 'availability', 'deliveryMode',
 ];
 
 const normalizeTags = (value) => {
@@ -322,7 +322,7 @@ exports.createListing = async (req, res) => {
     const {
       title, description, price, category, type, condition, location,
       pickupLocation, isNegotiable, originalPrice, quantity, rentDuration,
-      brand, model,
+      brand, model, deposit, availableFrom, availability, deliveryMode,
     } = req.body;
     const imageMetadata = (req.files || [])
       .map(mapUploadToImageMetadata)
@@ -354,6 +354,14 @@ exports.createListing = async (req, res) => {
       originalPrice: originalPrice === undefined || originalPrice === '' ? undefined : Number(originalPrice),
       quantity: quantity === undefined || quantity === '' ? 1 : Number(quantity),
       rentDuration: type === 'rent' ? rentDuration : undefined,
+      deposit: type === 'rent' && deposit !== undefined && deposit !== ''
+        ? Number(deposit) : undefined,
+      availableFrom: type === 'rent' && availableFrom
+        ? new Date(availableFrom) : undefined,
+      availability: type === 'service' && availability
+        ? availability : undefined,
+      deliveryMode: type === 'service' && deliveryMode
+        ? deliveryMode : undefined,
       brand: (brand || '').trim(),
       model: (model || '').trim(),
       tags: normalizeTags(req.body.tags),
@@ -413,7 +421,25 @@ exports.updateListing = async (req, res) => {
     if (updates.originalPrice !== undefined && updates.originalPrice !== '') updates.originalPrice = Number(updates.originalPrice);
     if (updates.originalPrice === '') updates.originalPrice = undefined;
     if (updates.quantity !== undefined) updates.quantity = Number(updates.quantity);
-    if (updates.type && updates.type !== 'rent') updates.rentDuration = undefined;
+    if (updates.deposit !== undefined && updates.deposit !== '') updates.deposit = Number(updates.deposit);
+    if (updates.deposit === '') updates.deposit = undefined;
+    if (updates.availableFrom !== undefined && updates.availableFrom !== '') updates.availableFrom = new Date(updates.availableFrom);
+    if (updates.availableFrom === '') updates.availableFrom = undefined;
+    const unsets = {};
+    if (updates.type && updates.type !== 'rent') {
+      unsets.rentDuration = 1;
+      unsets.deposit = 1;
+      unsets.availableFrom = 1;
+      delete updates.rentDuration;
+      delete updates.deposit;
+      delete updates.availableFrom;
+    }
+    if (updates.type && updates.type !== 'service') {
+      unsets.availability = 1;
+      unsets.deliveryMode = 1;
+      delete updates.availability;
+      delete updates.deliveryMode;
+    }
     if (req.files && req.files.length > 0) {
       const imageMetadata = req.files
         .map(mapUploadToImageMetadata)
@@ -436,9 +462,14 @@ exports.updateListing = async (req, res) => {
       updates.coverImageIndex = coverImageIndex;
     }
 
+    const updateQuery = { $set: updates };
+    if (Object.keys(unsets).length > 0) {
+      updateQuery.$unset = unsets;
+    }
+
     const updated = await Listing.findByIdAndUpdate(
       req.params.id,
-      { $set: updates },
+      updateQuery,
       { new: true, runValidators: true }
     );
 

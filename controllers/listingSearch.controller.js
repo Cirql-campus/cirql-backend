@@ -71,18 +71,72 @@ exports.getListings = async (req, res) => {
     filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
   }
 
-  let sortOpt = { boostedUntil: -1, _id: -1 };
-  if (sort === 'price_asc')  sortOpt = { boostedUntil: -1, price:  1, _id:  1 };
-  if (sort === 'price_desc') sortOpt = { boostedUntil: -1, price: -1, _id: -1 };
-  if (sort === 'views')      sortOpt = { boostedUntil: -1, views: -1, _id: -1 };
-  if (search && sort === 'newest') sortOpt = { boostedUntil: -1, score: { $meta: 'textScore' } };
+  let sortOpt = { isBoosted: -1, _id: -1 };
+  if (sort === 'price_asc')  sortOpt = { isBoosted: -1, price:  1, _id:  1 };
+  if (sort === 'price_desc') sortOpt = { isBoosted: -1, price: -1, _id: -1 };
+  if (sort === 'views')      sortOpt = { isBoosted: -1, views: -1, _id: -1 };
+  if (search && sort === 'newest') sortOpt = { isBoosted: -1, score: { $meta: 'textScore' } };
 
-  const listings = await Listing.find(filter)
-    .sort(sortOpt)
-    .limit(parsedLimit + 1)
-    .select('title price originalPrice isNegotiable quantity category type status condition images coverImageIndex seller college location pickupLocation tags brand model views isActive isSold createdAt')
-    .populate('seller', 'name avatar initials college rating isVerified')
-    .lean();
+  const pipeline = [
+    { $match: filter },
+    {
+      $addFields: {
+        isBoosted: {
+          $cond: [
+            { $and: [
+                { $ne: ['$boostedUntil', null] },
+                { $gt: ['$boostedUntil', new Date()] },
+            ]},
+            1,
+            0,
+          ],
+        },
+      },
+    },
+  ];
+
+  if (search && sort === 'newest') {
+    pipeline.push({
+      $addFields: {
+        score: { $meta: 'textScore' }
+      }
+    });
+  }
+
+  pipeline.push({ $sort: sortOpt });
+  pipeline.push({ $limit: parsedLimit + 1 });
+  pipeline.push({
+    $project: {
+      title: 1,
+      price: 1,
+      originalPrice: 1,
+      isNegotiable: 1,
+      quantity: 1,
+      category: 1,
+      type: 1,
+      status: 1,
+      condition: 1,
+      images: 1,
+      coverImageIndex: 1,
+      seller: 1,
+      college: 1,
+      location: 1,
+      pickupLocation: 1,
+      tags: 1,
+      brand: 1,
+      model: 1,
+      views: 1,
+      isActive: 1,
+      isSold: 1,
+      createdAt: 1,
+    }
+  });
+
+  let listings = await Listing.aggregate(pipeline);
+  listings = await Listing.populate(listings, {
+    path: 'seller',
+    select: 'name avatar initials college rating isVerified',
+  });
 
   const hasMore   = listings.length > parsedLimit;
   const finalData = hasMore ? listings.slice(0, parsedLimit) : listings;

@@ -995,5 +995,108 @@ describe('CirQl production integration flows', () => {
 
       expect(sendVerificationRejectedEmail).toHaveBeenCalled();
     });
+
+    describe('Type-specific listing fields (Rent, Sell, Free, Service)', () => {
+      test('should save rent-specific fields when type is rent', async () => {
+        const createListingReq = seller.agent
+          .post('/api/v1/listings')
+          .field('title', 'Rentable Lab Coat')
+          .field('description', 'White lab coat for chemistry labs.')
+          .field('price', '50')
+          .field('category', 'attire')
+          .field('type', 'rent')
+          .field('rentDuration', 'weekly')
+          .field('deposit', '200')
+          .field('availableFrom', '2026-09-01')
+          .field('location', 'Hostel 3');
+
+        const createRes = await attachListingImage(createListingReq).expect(201);
+        const lId = createRes.body.listing._id;
+
+        const dbListing = await Listing.findById(lId);
+        expect(dbListing).toMatchObject({
+          type: 'rent',
+          rentDuration: 'weekly',
+          deposit: 200,
+        });
+        expect(dbListing.availableFrom).toBeInstanceOf(Date);
+        expect(dbListing.availableFrom.toISOString().substring(0, 10)).toBe('2026-09-01');
+      });
+
+      test('should save service-specific fields when type is service', async () => {
+        const createListingReq = seller.agent
+          .post('/api/v1/listings')
+          .field('title', 'Maths Tutoring')
+          .field('description', 'Engineering mathematics coaching.')
+          .field('price', '150')
+          .field('category', 'tech')
+          .field('type', 'service')
+          .field('availability', 'weekends')
+          .field('deliveryMode', 'remote')
+          .field('location', 'Library');
+
+        const createRes = await attachListingImage(createListingReq).expect(201);
+        const lId = createRes.body.listing._id;
+
+        const dbListing = await Listing.findById(lId);
+        expect(dbListing).toMatchObject({
+          type: 'service',
+          availability: 'weekends',
+          deliveryMode: 'remote',
+        });
+      });
+
+      test('should ignore rent/service fields if type is sell', async () => {
+        const createListingReq = seller.agent
+          .post('/api/v1/listings')
+          .field('title', 'Physics Book')
+          .field('description', 'NCERT Physics Class 12th.')
+          .field('price', '200')
+          .field('category', 'academia')
+          .field('type', 'sell')
+          .field('deposit', '500')
+          .field('availableFrom', '2026-09-01')
+          .field('availability', 'anytime')
+          .field('deliveryMode', 'in_person')
+          .field('location', 'Library gate');
+
+        const createRes = await attachListingImage(createListingReq).expect(201);
+        const lId = createRes.body.listing._id;
+
+        const dbListing = await Listing.findById(lId);
+        expect(dbListing.deposit).toBeUndefined();
+        expect(dbListing.availableFrom).toBeUndefined();
+        expect(dbListing.availability).toBeUndefined();
+        expect(dbListing.deliveryMode).toBeUndefined();
+      });
+
+      test('updating listing type from rent to sell should clear deposit and availableFrom', async () => {
+        const createListingReq = seller.agent
+          .post('/api/v1/listings')
+          .field('title', 'Rentable Lab Coat 2')
+          .field('description', 'White lab coat for chemistry labs.')
+          .field('price', '50')
+          .field('category', 'attire')
+          .field('type', 'rent')
+          .field('rentDuration', 'weekly')
+          .field('deposit', '200')
+          .field('availableFrom', '2026-09-01')
+          .field('location', 'Hostel 3');
+
+        const createRes = await attachListingImage(createListingReq).expect(201);
+        const lId = createRes.body.listing._id;
+
+        await seller.agent
+          .put(`/api/v1/listings/${lId}`)
+          .send({ type: 'sell' })
+          .expect(200);
+
+        const dbListing = await Listing.findById(lId);
+        expect(dbListing.type).toBe('sell');
+        expect(dbListing.rentDuration).toBeUndefined();
+        expect(dbListing.deposit).toBeUndefined();
+        expect(dbListing.availableFrom).toBeUndefined();
+      });
+    });
   });
 });

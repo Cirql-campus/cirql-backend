@@ -77,4 +77,20 @@ const optionalAuth = async (req, _res, next) => {
   next();
 };
 
-module.exports = { protect, optionalAuth };
+const requireVerified = async (req, res, next) => {
+  const user = await User.findById(req.userId).select('isVerified registrationMethod verificationStatus');
+  if (!user) return error(res, 'User not found', 404);
+  if (!user.isVerified) {
+    const msg = user.registrationMethod === 'manual_verification'
+      ? user.verificationStatus === 'rejected'
+        ? 'Your ID verification was rejected. Please resubmit your ID photo.'
+        : user.verificationStatus === 'pending'
+          ? 'Your account is pending admin verification. You will get access once approved.'
+          : 'Please complete ID verification to continue.'
+      : 'Please verify your email to continue.';
+    return error(res, msg, 403);
+  }
+  next();
+};
+
+module.exports = { protect, optionalAuth, requireVerified };

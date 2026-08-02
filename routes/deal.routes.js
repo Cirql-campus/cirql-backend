@@ -4,7 +4,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const dealController = require('../controllers/deal.controller');
 const asyncHandler = require('../middleware/asyncHandler');
-const { protect } = require('../middleware/auth.middleware');
+const { protect, requireVerified } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
 const router = express.Router();
@@ -22,6 +22,7 @@ router.get('/',
 );
 
 router.post('/',
+  requireVerified,
   [
     body('listingId').isMongoId().withMessage('Invalid listing ID'),
     body('message').optional().trim().isLength({ max: 500 }).withMessage('Message too long'),

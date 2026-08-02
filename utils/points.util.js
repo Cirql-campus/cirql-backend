@@ -1,4 +1,5 @@
 'use strict';
+const mongoose = require('mongoose');
 const PointTransaction = require('../models/PointTransaction');
 const User = require('../models/User');
 const { POINT_VALUES, getTier, MAX_DAILY_EARN, EARN_EXPIRY_DAYS } = require('../config/points');
@@ -17,6 +18,9 @@ const awardPoints = async (userId, action, { refModel = null, refId = null, note
       return;
     }
 
+    // Mongoose aggregate queries do not auto-cast string IDs to ObjectIds unlike find/exists/findById
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
     // Anti-abuse: check total points earned today
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -24,7 +28,7 @@ const awardPoints = async (userId, action, { refModel = null, refId = null, note
     const earnedToday = await PointTransaction.aggregate([
       {
         $match: {
-          user: userId,
+          user: userObjectId,
           points: { $gt: 0 },
           createdAt: { $gte: todayStart },
         },
@@ -109,10 +113,17 @@ const spendPoints = async (userId, action, { refModel = null, refId = null, note
   const cost = Math.abs(POINT_VALUES[action]);
   if (!cost) return { ok: false, message: 'Invalid spend action' };
 
-  const user = await User.findById(userId).select('totalPoints');
-  if (!user) return { ok: false, message: 'User not found' };
-  if (user.totalPoints < cost) {
-    return { ok: false, message: `Not enough points. You need ${cost} points but have ${user.totalPoints}.` };
+  const updated = await User.findOneAndUpdate(
+    { _id: userId, totalPoints: { $gte: cost } },
+    { $inc: { totalPoints: -cost } },
+    { new: true, select: 'totalPoints' }
+  );
+  if (!updated) {
+    // Either user doesn't exist, or didn't have enough points —
+    // disambiguate with a cheap existence check only for the error message
+    const exists = await User.exists({ _id: userId });
+    if (!exists) return { ok: false, message: 'User not found' };
+    return { ok: false, message: `Not enough points for this action.` };
   }
 
   await PointTransaction.create({
@@ -124,8 +135,6 @@ const spendPoints = async (userId, action, { refModel = null, refId = null, note
     note,
     expiresAt: null, // spend transactions never expire
   });
-
-  await User.findByIdAndUpdate(userId, { $inc: { totalPoints: -cost } });
 
   logger.debug(`[POINTS] -${cost} spent by ${userId} for ${action}`);
   return { ok: true };

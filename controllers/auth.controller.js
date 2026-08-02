@@ -46,9 +46,14 @@ const isEmailDeliveryError = (err) =>
   ].includes(err.code) ||
   err.responseCode;
 
-const handleDuplicateEmail = (err, res) => {
-  if (err?.code === 11000 && err?.keyPattern?.email) {
-    return error(res, "An account with this email already exists", 409);
+const handleDuplicateKey = (err, res) => {
+  if (err?.code === 11000) {
+    if (err?.keyPattern?.email) {
+      return error(res, 'An account with this email already exists', 409);
+    }
+    if (err?.keyPattern?.rollNumber) {
+      return error(res, 'This roll number is already registered at this college', 409);
+    }
   }
   return null;
 };
@@ -157,7 +162,7 @@ exports.register = async (req, res) => {
 
     return success(res, { userId: user._id }, message, 201);
   } catch (err) {
-    const duplicateResponse = handleDuplicateEmail(err, res);
+    const duplicateResponse = handleDuplicateKey(err, res);
     if (duplicateResponse) return duplicateResponse;
     if (isEmailDeliveryError(err)) {
       logger.warn(
@@ -487,6 +492,10 @@ exports.changePassword = async (req, res) => {
 
 // POST /api/v1/auth/register/manual
 // Path B: personal email + roll number + ID photo
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 exports.registerManual = async (req, res) => {
   try {
     const { name, email, password, college, rollNumber, agreedToTerms } = req.body;
@@ -499,10 +508,16 @@ exports.registerManual = async (req, res) => {
       return error(res, 'College name and roll number are required', 400);
     }
 
+    const collegeInput = college.trim().replace(/\s+/g, ' ');
+    const matchedCollege = await College.findOne({
+      name: { $regex: new RegExp(`^${escapeRegex(collegeInput)}$`, 'i') }
+    });
+    const resolvedCollege = matchedCollege ? matchedCollege.name : collegeInput;
+
     // Check roll number not already used at this college
     const existingRoll = await User.findOne({
       rollNumber: rollNumber.trim().toUpperCase(),
-      college: college.trim(),
+      college: resolvedCollege,
     });
     if (existingRoll) {
       return error(res, 'This roll number is already registered at this college', 409);
@@ -518,7 +533,7 @@ exports.registerManual = async (req, res) => {
       user.name = name.trim();
       user.password = password;
       user.agreedToTermsAt = new Date();
-      user.college = college.trim();
+      user.college = resolvedCollege;
       user.rollNumber = rollNumber.trim().toUpperCase();
       user.registrationMethod = 'manual_verification';
       user.verificationStatus = 'pending';
@@ -527,7 +542,7 @@ exports.registerManual = async (req, res) => {
         name: name.trim(),
         email: emailLower,
         password,
-        college: college.trim(),
+        college: resolvedCollege,
         collegeDomain: '',
         rollNumber: rollNumber.trim().toUpperCase(),
         registrationMethod: 'manual_verification',
@@ -546,7 +561,7 @@ exports.registerManual = async (req, res) => {
 
     return success(res, { userId: user._id }, message, 201);
   } catch (err) {
-    const duplicateResponse = handleDuplicateEmail(err, res);
+    const duplicateResponse = handleDuplicateKey(err, res);
     if (duplicateResponse) return duplicateResponse;
     if (isEmailDeliveryError(err)) {
       logger.warn(`OTP email delivery failed: ${err.response || err.message}`);

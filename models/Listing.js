@@ -94,6 +94,28 @@ const listingSchema = new mongoose.Schema({
     type: String,
     enum: { values: ['hourly', 'daily', 'weekly', 'monthly', 'semester'], message: 'Invalid rent duration' },
   },
+  // Rent-specific
+  deposit: {
+    type: Number,
+    min: [0, 'Deposit cannot be negative'],
+    max: [500000, 'Deposit cannot exceed ₹5,00,000'],
+    default: undefined,
+  },
+  availableFrom: {
+    type: Date,
+    default: undefined,
+  },
+  // Service-specific
+  availability: {
+    type: String,
+    enum: { values: ['weekdays', 'weekends', 'anytime'], message: 'Invalid availability' },
+    default: undefined,
+  },
+  deliveryMode: {
+    type: String,
+    enum: { values: ['in_person', 'remote', 'either'], message: 'Invalid delivery mode' },
+    default: undefined,
+  },
   brand: { type: String, default: '', trim: true, maxlength: 80 },
   model: { type: String, default: '', trim: true, maxlength: 80 },
   tags: {

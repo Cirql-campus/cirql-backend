@@ -10,7 +10,8 @@
     "test": "jest --runInBand",
     "test:ci": "jest --runInBand --detectOpenHandles",
     "audit": "npm audit --audit-level=high",
-    "migrate:production-fields": "node scripts/migrate-production-fields.js"
+    "migrate:production-fields": "node scripts/migrate-production-fields.js",
+    "migrate:rollnumber-index": "node scripts/fix-rollnumber-index.js"
   },
   "engines": {
     "node": ">=18.0.0"

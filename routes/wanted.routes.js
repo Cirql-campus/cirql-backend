@@ -4,7 +4,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const wantedController = require('../controllers/wanted.controller');
 const asyncHandler = require('../middleware/asyncHandler');
-const { protect } = require('../middleware/auth.middleware');
+const { protect, requireVerified } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { wantedLimiter } = require('../middleware/rateLimit.middleware');
 
@@ -33,6 +33,7 @@ router.get('/mine',
 );
 
 router.post('/',
+  requireVerified,
   wantedLimiter,
   [
     body('title').trim().notEmpty().withMessage('Title is required').isLength({ min: 3, max: 100 }),

@@ -3,7 +3,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const chatController = require('../controllers/chat.controller');
 const asyncHandler = require('../middleware/asyncHandler');
-const { protect } = require('../middleware/auth.middleware');
+const { protect, requireVerified } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { chatLimiter, reportLimiter } = require('../middleware/rateLimit.middleware');
 
@@ -21,6 +21,7 @@ router.get('/conversations',
 );
 
 router.post('/conversations',
+  requireVerified,
   chatLimiter,
   [
     body('listingId').isMongoId().withMessage('Invalid listing ID'),

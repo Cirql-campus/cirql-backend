@@ -57,8 +57,11 @@ const userSchema = new mongoose.Schema({
   },
   rollNumber: {
     type: String,
-    default: null,
     trim: true,
+    set: value => {
+      const normalized = String(value || '').trim().toUpperCase();
+      return normalized || undefined;
+    },
   },
   idPhotoUrl: {
     type: String,
@@ -150,7 +153,7 @@ userSchema.index({ role: 1, adminCollege: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ rollNumber: 1, college: 1 }, {
   unique: true,
-  sparse: true, // sparse so null rollNumbers don't conflict
+  partialFilterExpression: { rollNumber: { $type: 'string' } },
 });
 userSchema.index({ totalPoints: -1 });
 userSchema.index({ lifetimePoints: -1 });
