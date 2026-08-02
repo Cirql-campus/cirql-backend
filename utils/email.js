@@ -214,4 +214,89 @@ const sendResetEmail = async (to, name, plainToken) => {
   });
 };
 
-module.exports = { sendOTPEmail, sendResetEmail, isEmailConfigured };
+// Generic wrapper checking email configuration
+const sendEmail = async ({ to, subject, html, text }) => {
+  if (!isEmailConfigured()) {
+    handleMissingEmailConfig(
+      `[DEV EMAIL] Email service not configured; to: ${to}, subject: ${subject}`,
+    );
+    return { skipped: true };
+  }
+  return sendBrevoEmail({ to, subject, html, text });
+};
+
+// Email to college admin when new verification request comes in
+const sendVerificationRequestEmail = async (adminEmail, { studentName, studentEmail, rollNumber, college, idPhotoUrl, adminPanelUrl }) => {
+  return sendEmail({
+    to: adminEmail,
+    subject: `[CirQl] New Verification Request — ${studentName} (${rollNumber})`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
+        <h2 style="color:#18181b">New Student Verification Request</h2>
+        <p>A student is waiting to join <strong>${college}</strong> on CirQl.</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0">
+          <tr><td style="padding:8px;color:#71717a">Name</td><td style="padding:8px;font-weight:500">${studentName}</td></tr>
+          <tr><td style="padding:8px;color:#71717a">Email</td><td style="padding:8px">${studentEmail}</td></tr>
+          <tr><td style="padding:8px;color:#71717a">Roll Number</td><td style="padding:8px;font-weight:500">${rollNumber}</td></tr>
+          <tr><td style="padding:8px;color:#71717a">College</td><td style="padding:8px">${college}</td></tr>
+        </table>
+        <p style="margin:16px 0"><img src="${idPhotoUrl}" alt="ID Photo" style="max-width:100%;border-radius:8px;border:1px solid #e4e4e7" /></p>
+        <a href="${adminPanelUrl}" style="display:inline-block;background:#00e554;color:#000;font-weight:700;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:8px">
+          Review in Admin Panel →
+        </a>
+        <p style="color:#a1a1aa;font-size:12px;margin-top:24px">Please review within 24 hours. If you cannot act on this, forward to cirqlofficial1@gmail.com</p>
+      </div>
+    `,
+  });
+};
+
+// Email to student when approved
+const sendVerificationApprovedEmail = async (studentEmail, { studentName, college, loginUrl }) => {
+  return sendEmail({
+    to: studentEmail,
+    subject: '🎉 Welcome to CirQl — Your Account is Verified!',
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;text-align:center">
+        <div style="font-size:48px;margin:24px 0">🎉</div>
+        <h1 style="color:#18181b">You're in, ${studentName}!</h1>
+        <p style="color:#71717a;font-size:16px">Your CirQl account for <strong>${college}</strong> has been verified by your college admin.</p>
+        <p style="color:#71717a">You can now buy, sell, and connect with students on your campus marketplace.</p>
+        <a href="${loginUrl}" style="display:inline-block;background:#00e554;color:#000;font-weight:700;padding:14px 32px;border-radius:8px;text-decoration:none;margin:24px 0;font-size:16px">
+          Log In to CirQl →
+        </a>
+        <p style="color:#a1a1aa;font-size:12px">Questions? Email us at cirqlofficial1@gmail.com</p>
+      </div>
+    `,
+  });
+};
+
+// Email to student when rejected
+const sendVerificationRejectedEmail = async (studentEmail, { studentName, reason, resubmitUrl }) => {
+  return sendEmail({
+    to: studentEmail,
+    subject: 'CirQl — Action Required: Verification Update',
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
+        <h2 style="color:#18181b">Verification Update for ${studentName}</h2>
+        <p>Unfortunately, we could not verify your ID at this time.</p>
+        <div style="background:#fef2f2;border-left:3px solid #ef4444;padding:12px 16px;border-radius:4px;margin:16px 0">
+          <strong>Reason:</strong> ${reason}
+        </div>
+        <p>Please resubmit with a clearer photo of your college ID card.</p>
+        <a href="${resubmitUrl}" style="display:inline-block;background:#18181b;color:#fff;font-weight:700;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:8px">
+          Resubmit ID Photo →
+        </a>
+        <p style="color:#a1a1aa;font-size:12px;margin-top:24px">Questions? Email cirqlofficial1@gmail.com</p>
+      </div>
+    `,
+  });
+};
+
+module.exports = {
+  sendOTPEmail,
+  sendResetEmail,
+  isEmailConfigured,
+  sendVerificationRequestEmail,
+  sendVerificationApprovedEmail,
+  sendVerificationRejectedEmail
+};

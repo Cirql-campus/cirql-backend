@@ -6,6 +6,7 @@ const Report   = require('../models/Report');
 const Notification    = require('../models/Notification');
 const { getIO } = require('../config/socket');
 const { success, error } = require('../utils/apiResponse');
+const { awardPoints } = require('../utils/points.util');
 const logger   = require('../utils/logger');
 const {
   listingCache,
@@ -375,6 +376,13 @@ exports.createListing = async (req, res) => {
     } catch (socketErr) {
       // ignore
     }
+
+    // Award points for posting a listing — background, never crashes request
+    awardPoints(req.userId, 'listing_created', {
+      refModel: 'Listing',
+      refId: listing._id,
+      note: `Listed: "${listing.title}"`,
+    });
 
     return success(res, { listing: decorateListingImages(listing) }, 'Listing created successfully', 201);
   } catch (err) {

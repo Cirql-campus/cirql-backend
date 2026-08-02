@@ -137,6 +137,7 @@ const listingSchema = new mongoose.Schema({
   pickupLocation: { type: String, default: '', trim: true, maxlength: 120 },
 
   views:           { type: Number, default: 0, min: 0 },
+  boostedUntil:    { type: Date, default: null },
   isActive:        { type: Boolean, default: true },
   isSold:          { type: Boolean, default: false },
   flagged:         { type: Boolean, default: false },
@@ -188,6 +189,7 @@ listingSchema.index({ seller: 1, status: 1, createdAt: -1 });
 listingSchema.index({ isActive: 1, status: 1, moderationStatus: 1, createdAt: -1 });
 listingSchema.index({ isActive: 1, status: 1, price: 1 });
 listingSchema.index({ isActive: 1, views: -1 });
+listingSchema.index({ boostedUntil: -1, isActive: 1 });
 listingSchema.index({ flagged: 1 });
 listingSchema.index({ tags: 1 });
 

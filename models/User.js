@@ -44,6 +44,40 @@ const userSchema = new mongoose.Schema({
 
   isVerified: { type: Boolean, default: false },
 
+  // Manual verification fields (Path B only)
+  registrationMethod: {
+    type: String,
+    enum: ['college_email', 'manual_verification'],
+    default: 'college_email',
+  },
+  verificationStatus: {
+    type: String,
+    enum: ['not_required', 'pending', 'approved', 'rejected'],
+    default: 'not_required',
+  },
+  rollNumber: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+  idPhotoUrl: {
+    type: String,
+    default: null,
+  },
+  verificationNote: {
+    type: String, // admin can add a rejection reason
+    default: null,
+  },
+  verifiedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  verifiedAt: {
+    type: Date,
+    default: null,
+  },
+
   // OTP stored as SHA-256 hash — never plain text
   verifyOTPHash:   { type: String, select: false },
   verifyOTPExpiry: { type: Date,   select: false },
@@ -57,6 +91,15 @@ const userSchema = new mongoose.Schema({
   reviewCount:  { type: Number, default: 0 },
   listingCount: { type: Number, default: 0 },
   soldCount:    { type: Number, default: 0 },
+
+  // Points system
+  totalPoints:    { type: Number, default: 0, min: 0 },
+  lifetimePoints: { type: Number, default: 0, min: 0 },
+  tier: {
+    type: String,
+    enum: ['new', 'regular', 'trusted', 'star_seller', 'campus_legend'],
+    default: 'new',
+  },
   wishlist: [{
     type: mongoose.Schema.Types.ObjectId,
     ref:  'Listing',
@@ -105,6 +148,12 @@ userSchema.index({ isVerified: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ role: 1, adminCollege: 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ rollNumber: 1, college: 1 }, {
+  unique: true,
+  sparse: true, // sparse so null rollNumbers don't conflict
+});
+userSchema.index({ totalPoints: -1 });
+userSchema.index({ lifetimePoints: -1 });
 
 // ── Pre-save hooks ────────────────────────────────────────────────────────────
 userSchema.pre('save', async function (next) {
@@ -156,10 +205,17 @@ userSchema.methods.toPublicJSON = function () {
     role:          this.role,
     adminCollege:  this.adminCollege,
     isVerified:    this.isVerified,
+    verificationStatus: this.verificationStatus,
+    registrationMethod: this.registrationMethod,
+    rollNumber:         this.rollNumber,
+    idPhotoUrl:         this.idPhotoUrl,
     rating:        this.rating,
     reviewCount:   this.reviewCount,
     listingCount:  this.listingCount,
     soldCount:     this.soldCount,
+    totalPoints:    this.totalPoints    || 0,
+    lifetimePoints: this.lifetimePoints || 0,
+    tier:           this.tier           || 'new',
     wishlist:      this.wishlist,
     notificationPreferences: {
       ...DEFAULT_NOTIFICATION_PREFERENCES,

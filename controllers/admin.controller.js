@@ -14,6 +14,7 @@ const { success, error } = require('../utils/apiResponse');
 const logger   = require('../utils/logger');
 const { categoryCache, listingCache, flushCacheNamespace } = require('../utils/cache');
 const { logAdminAction } = require('../utils/audit');
+const { sendVerificationApprovedEmail, sendVerificationRejectedEmail } = require('../utils/email');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -933,4 +934,81 @@ exports.getHealth = async (req, res) => {
     requestsLastHour: 0,  // placeholder
     errorsLastHour: 0,    // placeholder
   });
+};
+
+// GET /api/v1/admin/verifications
+// Returns pending verification requests for this admin's college
+exports.getPendingVerifications = async (req, res) => {
+  const filter = {
+    registrationMethod: 'manual_verification',
+    verificationStatus: 'pending',
+  };
+
+  // College admin only sees their college
+  if (req.user.role === 'college_admin') {
+    filter.college = req.user.adminCollege;
+  }
+
+  const pending = await User.find(filter)
+    .select('name email college rollNumber idPhotoUrl createdAt')
+    .sort({ createdAt: 1 }) // oldest first — FIFO
+    .lean();
+
+  return success(res, { verifications: pending, total: pending.length });
+};
+
+// POST /api/v1/admin/verifications/:id/approve
+exports.approveVerification = async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return error(res, 'User not found', 404);
+  if (user.verificationStatus !== 'pending') {
+    return error(res, 'This verification is not pending', 400);
+  }
+
+  // College admin can only approve their own college
+  if (req.user.role === 'college_admin' && user.college !== req.user.adminCollege) {
+    return error(res, 'Access denied — this student belongs to a different college', 403);
+  }
+
+  user.verificationStatus = 'approved';
+  user.isVerified = true;
+  user.verifiedBy = req.userId;
+  user.verifiedAt = new Date();
+  await user.save();
+
+  // Send congratulations email
+  await sendVerificationApprovedEmail(user.email, {
+    studentName: user.name,
+    college: user.college,
+    loginUrl: 'https://cirql.store/login',
+  });
+
+  logger.info(`[ADMIN] ${req.user.email} approved verification for ${user.email}`);
+  return success(res, {}, `${user.name} has been verified and can now access CirQl`);
+};
+
+// POST /api/v1/admin/verifications/:id/reject
+exports.rejectVerification = async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return error(res, 'User not found', 404);
+
+  if (req.user.role === 'college_admin' && user.college !== req.user.adminCollege) {
+    return error(res, 'Access denied', 403);
+  }
+
+  const { reason } = req.body;
+  user.verificationStatus = 'rejected';
+  user.verificationNote = reason || 'ID could not be verified. Please resubmit with a clearer photo.';
+  user.verifiedBy = req.userId;
+  user.verifiedAt = new Date();
+  await user.save();
+
+  // Send rejection email with reason and resubmit option
+  await sendVerificationRejectedEmail(user.email, {
+    studentName: user.name,
+    reason: user.verificationNote,
+    resubmitUrl: 'https://cirql.store/verify-id',
+  });
+
+  return success(res, {}, `Verification rejected for ${user.name}`);
 };

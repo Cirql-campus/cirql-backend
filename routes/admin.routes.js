@@ -4,7 +4,7 @@ const { body, param, query } = require('express-validator');
 const adminController = require('../controllers/admin.controller');
 const asyncHandler    = require('../middleware/asyncHandler');
 const { validate }    = require('../middleware/validate.middleware');
-const { superAdmin }  = require('../middleware/admin.middleware');
+const { superAdmin, anyAdmin, scopeCollege }  = require('../middleware/admin.middleware');
 
 const router = express.Router();
 
@@ -226,6 +226,15 @@ router.post(
   ],
   validate,
   asyncHandler(adminController.notifyCollege)
+);
+
+router.get('/verifications', anyAdmin, scopeCollege, asyncHandler(adminController.getPendingVerifications));
+router.post('/verifications/:id/approve', anyAdmin, asyncHandler(adminController.approveVerification));
+router.post('/verifications/:id/reject',
+  anyAdmin,
+  [body('reason').optional().trim().isLength({ max: 300 })],
+  validate,
+  asyncHandler(adminController.rejectVerification)
 );
 
 module.exports = router;

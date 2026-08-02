@@ -8,9 +8,34 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 jest.mock('../utils/email', () => ({
   sendOTPEmail: jest.fn().mockResolvedValue({ skipped: false }),
   sendResetEmail: jest.fn().mockResolvedValue(undefined),
+  sendVerificationRequestEmail: jest.fn().mockResolvedValue({ skipped: false }),
+  sendVerificationApprovedEmail: jest.fn().mockResolvedValue({ skipped: false }),
+  sendVerificationRejectedEmail: jest.fn().mockResolvedValue({ skipped: false }),
 }));
 
-const { sendOTPEmail } = require('../utils/email');
+jest.mock('cloudinary', () => ({
+  v2: {
+    config: jest.fn(),
+    uploader: {
+      upload_stream: jest.fn().mockImplementation((options, callback) => {
+        return {
+          write: jest.fn(),
+          end: jest.fn().mockImplementation(() => {
+            callback(null, { secure_url: 'https://res.cloudinary.com/test-cloud/image/upload/v12345/cirql/id-verifications/mock-id.jpg' });
+          }),
+        };
+      }),
+      destroy: jest.fn().mockResolvedValue({ result: 'ok' }),
+    },
+  },
+}));
+
+const {
+  sendOTPEmail,
+  sendVerificationRequestEmail,
+  sendVerificationApprovedEmail,
+  sendVerificationRejectedEmail,
+} = require('../utils/email');
 const Listing = require('../models/Listing');
 
 jest.setTimeout(300_000);
@@ -824,5 +849,151 @@ describe('CirQl production integration flows', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('production env validation passed');
+  });
+
+  describe('Manual ID Verification Registration Flow (Path B)', () => {
+    const studentEmail = 'manual-student@gmail.com';
+    const rollNumber = '2100140100099';
+    const collegeName = 'GLA University';
+    let studentId;
+    let studentToken;
+    let plaintextOtp;
+
+    test('registerManual creates pending manual verification user', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/register/manual')
+        .send({
+          name: 'Manual Student',
+          email: studentEmail,
+          password: TEST_PASSWORD,
+          college: collegeName,
+          rollNumber,
+          agreedToTerms: 'true',
+        })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body).toHaveProperty('userId');
+      studentId = res.body.userId;
+
+      const otpCall = sendOTPEmail.mock.calls.find(call => call[0] === studentEmail);
+      expect(otpCall).toBeTruthy();
+      plaintextOtp = otpCall[2];
+
+      const User = require('../models/User');
+      const u = await User.findById(studentId);
+      expect(u).toBeTruthy();
+      expect(u.registrationMethod).toBe('manual_verification');
+      expect(u.verificationStatus).toBe('pending');
+      expect(u.rollNumber).toBe(rollNumber);
+      expect(u.college).toBe(collegeName);
+      expect(u.isVerified).toBe(false);
+    });
+
+    test('verifyOTP for manual user keeps account isVerified = false but issues token', async () => {
+      expect(plaintextOtp).toBeTruthy();
+
+      const res = await request(app)
+        .post('/api/v1/auth/verify-otp')
+        .send({ email: studentEmail, otp: plaintextOtp })
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.isVerified).toBe(false);
+      expect(res.body).toHaveProperty('accessToken');
+      studentToken = res.body.accessToken;
+
+      const User = require('../models/User');
+      const u = await User.findById(studentId);
+      expect(u.isVerified).toBe(false);
+    });
+
+    test('submitIDPhoto uploads fake photo buffer and transitions status', async () => {
+      expect(studentToken).toBeTruthy();
+      const fakeBuffer = Buffer.from('fake-image-binary-content');
+      
+      const res = await request(app)
+        .post('/api/v1/auth/register/submit-id')
+        .set('Authorization', `Bearer ${studentToken}`)
+        .attach('idPhoto', fakeBuffer, 'student_id.jpg')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+
+      const User = require('../models/User');
+      const u = await User.findById(studentId);
+      expect(u.idPhotoUrl).toContain('cloudinary.com');
+      expect(u.verificationStatus).toBe('pending');
+    });
+
+    test('login is blocked for pending manual verification user', async () => {
+      await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: studentEmail, password: TEST_PASSWORD })
+        .expect(401);
+    });
+
+    test('adminController.getPendingVerifications lists pending requests', async () => {
+      const res = await adminUser.agent
+        .get('/api/v1/admin/verifications')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body).toHaveProperty('verifications');
+    });
+
+    test('adminController.approveVerification approves user and enables login', async () => {
+      const res = await adminUser.agent
+        .post(`/api/v1/admin/verifications/${studentId}/approve`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+
+      const User = require('../models/User');
+      const u = await User.findById(studentId);
+      expect(u.verificationStatus).toBe('approved');
+      expect(u.isVerified).toBe(true);
+
+      // Welcome email sent
+      expect(sendVerificationApprovedEmail).toHaveBeenCalled();
+
+      // Can now log in
+      await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: studentEmail, password: TEST_PASSWORD })
+        .expect(200);
+    });
+
+    test('adminController.rejectVerification rejects user and sets reason', async () => {
+      // Register a second student for rejection testing
+      const email2 = 'manual-student2@gmail.com';
+      const roll2 = '2100140100098';
+      
+      const regRes = await request(app)
+        .post('/api/v1/auth/register/manual')
+        .send({
+          name: 'Manual Student 2',
+          email: email2,
+          password: TEST_PASSWORD,
+          college: collegeName,
+          rollNumber: roll2,
+          agreedToTerms: 'true',
+        });
+      
+      const studentId2 = regRes.body.userId;
+
+      await adminUser.agent
+        .post(`/api/v1/admin/verifications/${studentId2}/reject`)
+        .send({ reason: 'ID card blurry' })
+        .expect(200);
+
+      const User = require('../models/User');
+      const u2 = await User.findById(studentId2);
+      expect(u2.verificationStatus).toBe('rejected');
+      expect(u2.verificationNote).toBe('ID card blurry');
+      expect(u2.isVerified).toBe(false);
+
+      expect(sendVerificationRejectedEmail).toHaveBeenCalled();
+    });
   });
 });

@@ -8,6 +8,7 @@ const { authLimiter, otpLimiter } = require('../middleware/rateLimit.middleware'
 const { validate } = require('../middleware/validate.middleware');
 const { protect } = require('../middleware/auth.middleware');
 const asyncHandler = require('../middleware/asyncHandler');
+const { upload } = require('../middleware/upload.middleware');
 
 const passwordValidationRules = (field) => body(field)
   .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
@@ -100,6 +101,26 @@ router.put('/change-password',
   ],
   validate,
   asyncHandler(authController.changePassword)
+);
+
+router.post('/register/manual',
+  authLimiter,
+  [
+    body('name').trim().isLength({ min: 2, max: 60 }).withMessage('Name must be 2–60 characters'),
+    body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('college').trim().isLength({ min: 2, max: 100 }).withMessage('College name required'),
+    body('rollNumber').trim().isLength({ min: 3, max: 30 }).withMessage('Roll number required'),
+    body('agreedToTerms').equals('true').withMessage('You must agree to Terms & Conditions'),
+  ],
+  validate,
+  asyncHandler(authController.registerManual)
+);
+
+router.post('/register/submit-id',
+  protect,
+  upload.single('idPhoto'),
+  asyncHandler(authController.submitIDPhoto)
 );
 
 module.exports = router;

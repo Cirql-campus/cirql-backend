@@ -8,6 +8,7 @@ const Listing = require('../models/Listing');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const Deal = require('../models/Deal');
+const { awardPoints } = require('../utils/points.util');
 const { success, error } = require('../utils/apiResponse');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -259,7 +260,7 @@ exports.reviewUser = async (req, res) => {
     );
   }
 
-  await Review.create({
+  const review = await Review.create({
     seller:   sellerId,
     reviewer: req.userId,
     listing: eligibleListing.listing._id,
@@ -279,6 +280,16 @@ exports.reviewUser = async (req, res) => {
   seller.rating      = Math.min(5, Math.max(1, avgRating));
   seller.reviewCount = reviewCount;
   await seller.save();
+
+  // Award points to seller for receiving a good review
+  // awardPoints is safe to call without awaiting — never crashes caller
+  if (rating >= 4) {
+    awardPoints(
+      sellerId,
+      rating === 5 ? 'review_received_5star' : 'review_received_4star',
+      { refModel: 'Review', refId: review._id, note: `${rating}-star review received` }
+    );
+  }
 
   return success(res, null, 'Review submitted successfully', 201);
 };

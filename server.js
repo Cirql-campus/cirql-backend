@@ -278,6 +278,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   // ── API Routes ─────────────────────────────────────────────────────────────
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/listings", listingRoutes);
+  app.use('/api/v1/points', require('./routes/points.routes'));
   app.use("/api/v1/users", userRoutes);
   app.use("/api/v1/chat", chatRoutes);
   app.use("/api/v1/deals", dealRoutes);

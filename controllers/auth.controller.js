@@ -7,10 +7,25 @@ const College = require("../models/College");
 const RefreshToken = require("../models/RefreshToken");
 const { success, error } = require("../utils/apiResponse");
 const { isCollegeEmail, detectCollege } = require("../utils/collegeDetect");
-const { sendOTPEmail, sendResetEmail } = require("../utils/email");
+const { sendOTPEmail, sendResetEmail, sendVerificationRequestEmail } = require("../utils/email");
 const logger = require("../utils/logger");
 const { buildCookieOptions } = require("../utils/cookieOptions");
 const { isSuperAdminEmail } = require("../utils/adminEmails");
+const Notification = require("../models/Notification");
+const cloudinary = require("../config/cloudinary");
+
+const uploadToCloudinary = (buffer, options) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      options,
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+    uploadStream.end(buffer);
+  });
+};
 
 const normalizeEmail = (email) =>
   String(email || "")
@@ -192,13 +207,16 @@ exports.verifyOTP = async (req, res) => {
     );
   }
 
-  user.isVerified = true;
+  const isManual = user.registrationMethod === 'manual_verification';
+  const isVerifiedVal = isManual ? false : true;
+
+  user.isVerified = isVerifiedVal;
   user.otpAttempts = 0;
 
   await User.updateOne(
     { _id: user._id },
     {
-      $set: { isVerified: true, otpAttempts: 0 },
+      $set: { isVerified: isVerifiedVal, otpAttempts: 0 },
       $unset: { verifyOTPHash: 1, verifyOTPExpiry: 1 },
     },
   );
@@ -465,4 +483,150 @@ exports.changePassword = async (req, res) => {
     {},
     "Password successfully changed. Please log in again.",
   );
+};
+
+// POST /api/v1/auth/register/manual
+// Path B: personal email + roll number + ID photo
+exports.registerManual = async (req, res) => {
+  try {
+    const { name, email, password, college, rollNumber, agreedToTerms } = req.body;
+    const emailLower = normalizeEmail(email);
+
+    if (!agreedToTerms || agreedToTerms === 'false') {
+      return error(res, 'You must agree to the Terms & Conditions and Privacy Policy', 400);
+    }
+    if (!college || !rollNumber) {
+      return error(res, 'College name and roll number are required', 400);
+    }
+
+    // Check roll number not already used at this college
+    const existingRoll = await User.findOne({
+      rollNumber: rollNumber.trim().toUpperCase(),
+      college: college.trim(),
+    });
+    if (existingRoll) {
+      return error(res, 'This roll number is already registered at this college', 409);
+    }
+
+    // Check email not already used
+    let user = await User.findOne({ email: emailLower }).select('+verifyOTPHash +verifyOTPExpiry +otpAttempts');
+    if (user && user.isVerified) {
+      return error(res, 'An account with this email already exists', 409);
+    }
+
+    if (user) {
+      user.name = name.trim();
+      user.password = password;
+      user.agreedToTermsAt = new Date();
+      user.college = college.trim();
+      user.rollNumber = rollNumber.trim().toUpperCase();
+      user.registrationMethod = 'manual_verification';
+      user.verificationStatus = 'pending';
+    } else {
+      user = new User({
+        name: name.trim(),
+        email: emailLower,
+        password,
+        college: college.trim(),
+        collegeDomain: '',
+        rollNumber: rollNumber.trim().toUpperCase(),
+        registrationMethod: 'manual_verification',
+        verificationStatus: 'pending',
+        agreedToTermsAt: new Date(),
+      });
+    }
+
+    const otp = user.createOTP();
+    await user.save();
+
+    const otpDelivery = await sendOTPEmail(emailLower, name.trim(), otp);
+    const message = otpDelivery?.skipped
+      ? 'OTP generated. Check the backend console.'
+      : 'OTP sent to your email. Verify to continue.';
+
+    return success(res, { userId: user._id }, message, 201);
+  } catch (err) {
+    const duplicateResponse = handleDuplicateEmail(err, res);
+    if (duplicateResponse) return duplicateResponse;
+    if (isEmailDeliveryError(err)) {
+      logger.warn(`OTP email delivery failed: ${err.response || err.message}`);
+      return error(res, 'Could not send OTP email. Please check email configuration and try again.', 503);
+    }
+    throw err;
+  }
+};
+
+// POST /api/v1/auth/register/submit-id
+// Called after OTP verification for Path B users
+// Expects multipart/form-data with 'idPhoto' file
+exports.submitIDPhoto = async (req, res) => {
+  const user = await User.findById(req.userId);
+  if (!user) return error(res, 'User not found', 404);
+  if (user.registrationMethod !== 'manual_verification') {
+    return error(res, 'This step is not required for your registration type', 400);
+  }
+  if (!req.file) return error(res, 'ID photo is required', 400);
+
+  // Upload to Cloudinary
+  const uploadResult = await uploadToCloudinary(req.file.buffer, {
+    folder: 'cirql/id-verifications',
+    resource_type: 'image',
+    transformation: [{ quality: 'auto', fetch_format: 'auto' }],
+  });
+
+  user.idPhotoUrl = uploadResult.secure_url;
+  user.verificationStatus = 'pending';
+  await user.save();
+
+  // Notify college admin immediately
+  const collegeAdmin = await User.findOne({
+    role: 'college_admin',
+    adminCollege: user.college,
+  });
+
+  if (collegeAdmin) {
+    // Email notification
+    await sendVerificationRequestEmail(collegeAdmin.email, {
+      studentName: user.name,
+      studentEmail: user.email,
+      rollNumber: user.rollNumber,
+      college: user.college,
+      idPhotoUrl: user.idPhotoUrl,
+      adminPanelUrl: 'https://cirql.store/admin',
+    });
+
+    // In-app notification
+    await Notification.create({
+      user: collegeAdmin._id,
+      type: 'message',
+      text: `New verification request from ${user.name} (Roll: ${user.rollNumber})`,
+      link: '/admin?tab=verifications',
+    });
+
+    // Socket notification to admin if online
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${collegeAdmin._id}`).emit('new_notification', {
+        notification: {
+          text: `New verification request from ${user.name}`,
+          link: '/admin?tab=verifications',
+        },
+      });
+    }
+  }
+
+  // Also notify super admin if no college admin assigned
+  if (!collegeAdmin) {
+    const superAdmins = await User.find({ role: 'super_admin' }).select('_id email');
+    for (const sa of superAdmins) {
+      await Notification.create({
+        user: sa._id,
+        type: 'message',
+        text: `New unassigned verification request from ${user.name} at ${user.college}`,
+        link: '/admin?tab=verifications',
+      });
+    }
+  }
+
+  return success(res, {}, 'ID photo submitted. A college admin will review your request. You will receive an email once verified.');
 };

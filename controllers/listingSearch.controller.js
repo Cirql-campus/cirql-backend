@@ -71,11 +71,11 @@ exports.getListings = async (req, res) => {
     filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
   }
 
-  let sortOpt = { _id: -1 };
-  if (sort === 'price_asc')  sortOpt = { price:  1, _id:  1 };
-  if (sort === 'price_desc') sortOpt = { price: -1, _id: -1 };
-  if (sort === 'views')      sortOpt = { views: -1, _id: -1 };
-  if (search && sort === 'newest') sortOpt = { score: { $meta: 'textScore' } };
+  let sortOpt = { boostedUntil: -1, _id: -1 };
+  if (sort === 'price_asc')  sortOpt = { boostedUntil: -1, price:  1, _id:  1 };
+  if (sort === 'price_desc') sortOpt = { boostedUntil: -1, price: -1, _id: -1 };
+  if (sort === 'views')      sortOpt = { boostedUntil: -1, views: -1, _id: -1 };
+  if (search && sort === 'newest') sortOpt = { boostedUntil: -1, score: { $meta: 'textScore' } };
 
   const listings = await Listing.find(filter)
     .sort(sortOpt)

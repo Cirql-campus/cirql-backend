@@ -9,6 +9,7 @@ const { success, error } = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const { listingCache, flushCacheNamespace } = require('../utils/cache');
 const { sendPushNotification } = require('../utils/push.util');
+const { awardPoints } = require('../utils/points.util');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -194,6 +195,19 @@ exports.updateDealStatus = async (req, res) => {
       listing.isSold = true;
       listing.isActive = false;
       await User.findByIdAndUpdate(deal.seller, { $inc: { soldCount: 1 } });
+      // Award points — wrapped in Promise.all but errors are swallowed inside awardPoints (fired in background, not awaited)
+      Promise.all([
+        awardPoints(deal.seller, 'deal_completed_seller', {
+          refModel: 'Deal',
+          refId: deal._id,
+          note: `Deal completed: "${listing.title}"`,
+        }),
+        awardPoints(deal.buyer, 'deal_completed_buyer', {
+          refModel: 'Deal',
+          refId: deal._id,
+          note: `Deal completed: "${listing.title}"`,
+        }),
+      ]);
       await Deal.updateMany(
         { _id: { $ne: deal._id }, listing: listing._id, status: { $in: ['requested', 'accepted'] } },
         { $set: { status: 'cancelled', cancelledAt: new Date(), statusNote: 'Listing sold through another deal' } }
