@@ -96,6 +96,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   const categoryRoutes = require("./routes/category.routes");
   const dealRoutes = require("./routes/deal.routes");
   const wantedRoutes = require("./routes/wanted.routes");
+  const spotHubRoutes = require("./routes/spotHub.routes");
 
   const app = express();
   const server = http.createServer(app);
@@ -283,6 +284,7 @@ if (cluster.isPrimary && shouldUseCluster) {
   app.use("/api/v1/chat", chatRoutes);
   app.use("/api/v1/deals", dealRoutes);
   app.use("/api/v1/wanted", wantedRoutes);
+  app.use("/api/v1/spot-hub", spotHubRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/admin", protect, anyAdmin, scopeCollege, adminRoutes);
   app.use("/api/v1/categories", categoryRoutes);

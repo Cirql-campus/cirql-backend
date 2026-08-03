@@ -1099,4 +1099,145 @@ describe('CirQl production integration flows', () => {
       });
     });
   });
+
+  describe('Spot Hub features', () => {
+    let testPostId;
+
+    test('should create a Spot Hub post successfully', async () => {
+      const res = await seller.agent
+        .post('/api/v1/spot-hub')
+        .send({
+          placeName: 'Munchies Cafe',
+          description: 'Amazing sandwiches and milkshakes.',
+          category: 'food',
+          images: ['https://cloudinary.com/munchies1.jpg']
+        })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.post.placeName).toBe('Munchies Cafe');
+      expect(res.body.post.poster._id).toBe(seller.user._id);
+      expect(res.body.post.college).toBe(seller.user.college);
+      expect(res.body.post.status).toBe('active');
+      expect(res.body.post.isOutdated).toBe(false);
+
+      testPostId = res.body.post._id;
+    });
+
+    test('should reject creation if images are missing or invalid', async () => {
+      await seller.agent
+        .post('/api/v1/spot-hub')
+        .send({
+          placeName: 'Munchies Cafe',
+          description: 'Amazing sandwiches.',
+          category: 'food',
+          images: []
+        })
+        .expect(422);
+
+      await seller.agent
+        .post('/api/v1/spot-hub')
+        .send({
+          placeName: 'Munchies Cafe',
+          description: 'Amazing sandwiches.',
+          category: 'food',
+          images: ['img1', 'img2', 'img3', 'img4']
+        })
+        .expect(422);
+    });
+
+    test('should ignore client-supplied college and use server session college', async () => {
+      const res = await seller.agent
+        .post('/api/v1/spot-hub')
+        .send({
+          placeName: 'Secret Spot',
+          description: 'A cozy corner.',
+          category: 'hangout',
+          images: ['https://cloudinary.com/secret.jpg'],
+          college: 'Fake College'
+        })
+        .expect(201);
+
+      expect(res.body.post.college).toBe(seller.user.college);
+      expect(res.body.post.college).not.toBe('Fake College');
+    });
+
+    test('should get posts scoped to the users college', async () => {
+      const res = await seller.agent
+        .get('/api/v1/spot-hub')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.posts.length).toBeGreaterThan(0);
+      res.body.posts.forEach(p => {
+        expect(p.college).toBe(seller.user.college);
+      });
+    });
+
+    test('should not show posts of other college to otherCollegeUser', async () => {
+      const res = await otherCollegeUser.agent
+        .get('/api/v1/spot-hub')
+        .expect(200);
+
+      const containsTestPost = res.body.posts.some(p => p._id === testPostId);
+      expect(containsTestPost).toBe(false);
+    });
+
+    test('should upvote a post and handle toggle and switch', async () => {
+      let res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/upvote`)
+        .expect(200);
+
+      expect(res.body.post.upvotes.map(id => id.toString())).toContain(buyer.user._id);
+      expect(res.body.post.downvotes.map(id => id.toString())).not.toContain(buyer.user._id);
+      expect(res.body.post.voteScore).toBe(1);
+
+      res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/upvote`)
+        .expect(200);
+
+      expect(res.body.post.upvotes.map(id => id.toString())).not.toContain(buyer.user._id);
+      expect(res.body.post.downvotes.map(id => id.toString())).not.toContain(buyer.user._id);
+      expect(res.body.post.voteScore).toBe(0);
+
+      res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/downvote`)
+        .expect(200);
+
+      expect(res.body.post.downvotes.map(id => id.toString())).toContain(buyer.user._id);
+      expect(res.body.post.upvotes.map(id => id.toString())).not.toContain(buyer.user._id);
+      expect(res.body.post.voteScore).toBe(-1);
+
+      res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/upvote`)
+        .expect(200);
+
+      expect(res.body.post.upvotes.map(id => id.toString())).toContain(buyer.user._id);
+      expect(res.body.post.downvotes.map(id => id.toString())).not.toContain(buyer.user._id);
+      expect(res.body.post.voteScore).toBe(1);
+    });
+
+    test('should allow any authenticated user to flag a post as outdated', async () => {
+      const res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/flag-outdated`)
+        .expect(200);
+
+      expect(res.body.post.isOutdated).toBe(true);
+    });
+
+    test('should refuse deletion from non-poster non-admin', async () => {
+      await buyer.agent
+        .delete(`/api/v1/spot-hub/${testPostId}`)
+        .expect(403);
+    });
+
+    test('should allow deletion from poster', async () => {
+      await seller.agent
+        .delete(`/api/v1/spot-hub/${testPostId}`)
+        .expect(200);
+
+      const checkDb = await mongoose.model('SpotHubPost').findById(testPostId);
+      expect(checkDb).toBeNull();
+    });
+  });
 });
