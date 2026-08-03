@@ -207,7 +207,7 @@ exports.updateDealStatus = async (req, res) => {
           refId: deal._id,
           note: `Deal completed: "${listing.title}"`,
         }),
-      ]);
+      ]).catch(err => logger.error('[POINTS] deal award Promise.all error:', err.message));
       await Deal.updateMany(
         { _id: { $ne: deal._id }, listing: listing._id, status: { $in: ['requested', 'accepted'] } },
         { $set: { status: 'cancelled', cancelledAt: new Date(), statusNote: 'Listing sold through another deal' } }
