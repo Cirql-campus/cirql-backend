@@ -930,7 +930,7 @@ describe('CirQl production integration flows', () => {
       await request(app)
         .post('/api/v1/auth/login')
         .send({ email: studentEmail, password: TEST_PASSWORD })
-        .expect(401);
+        .expect(403);
     });
 
     test('adminController.getPendingVerifications lists pending requests', async () => {

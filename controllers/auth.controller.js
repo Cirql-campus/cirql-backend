@@ -260,7 +260,25 @@ exports.login = async (req, res) => {
   }
 
   if (!user.isVerified) {
-    return error(res, "Please verify your email before logging in", 401);
+    // Manual verification users: give a specific, accurate message
+    if (user.registrationMethod === 'manual_verification') {
+      if (user.verificationStatus === 'pending') {
+        return error(
+          res,
+          'Your account is under review. You will receive an email once your ID is verified by your college admin. Questions? Email cirqlofficial1@gmail.com',
+          403
+        );
+      }
+      if (user.verificationStatus === 'rejected') {
+        return error(
+          res,
+          'Your ID verification was not approved. Please check your email for the reason and resubmit your ID photo.',
+          403
+        );
+      }
+    }
+    // College email users: standard OTP verification message
+    return error(res, 'Please verify your email before logging in', 401);
   }
 
   const match = await user.comparePassword(password);
