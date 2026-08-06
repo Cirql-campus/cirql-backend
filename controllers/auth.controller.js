@@ -532,13 +532,19 @@ exports.registerManual = async (req, res) => {
     });
     const resolvedCollege = matchedCollege ? matchedCollege.name : collegeInput;
 
-    // Check roll number not already used at this college
+    // Check if roll number already exists at this college
     const existingRoll = await User.findOne({
       rollNumber: rollNumber.trim().toUpperCase(),
       college: resolvedCollege,
     });
     if (existingRoll) {
-      return error(res, 'This roll number is already registered at this college', 409);
+      if (existingRoll.isVerified) {
+        return error(res, 'This roll number is already registered at this college', 409);
+      } else {
+        // If the old account with this roll number was never verified, delete it to free up the roll number
+        logger.info(`[AUTH] Deleting unverified user ${existingRoll._id} with conflicting roll number ${rollNumber} to allow re-registration`);
+        await User.deleteOne({ _id: existingRoll._id });
+      }
     }
 
     // Check email not already used

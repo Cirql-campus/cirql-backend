@@ -852,7 +852,7 @@ describe('CirQl production integration flows', () => {
   });
 
   describe('Manual ID Verification Registration Flow (Path B)', () => {
-    const studentEmail = 'manual-student@gmail.com';
+    let studentEmail = 'manual-student@gmail.com';
     const rollNumber = '2100140100099';
     const collegeName = 'GLA University';
     let studentId;
@@ -888,6 +888,40 @@ describe('CirQl production integration flows', () => {
       expect(u.rollNumber).toBe(rollNumber);
       expect(u.college).toBe(collegeName);
       expect(u.isVerified).toBe(false);
+    });
+
+    test('registerManual overwrites/deletes unverified user with same roll number', async () => {
+      const conflictingEmail = 'manual-student-conflict@gmail.com';
+      // Register with the same roll number but a different email
+      const res = await request(app)
+        .post('/api/v1/auth/register/manual')
+        .send({
+          name: 'Manual Student Conflict',
+          email: conflictingEmail,
+          password: TEST_PASSWORD,
+          college: collegeName,
+          rollNumber,
+          agreedToTerms: 'true',
+        })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+
+      const User = require('../models/User');
+      const oldUser = await User.findById(studentId);
+      expect(oldUser).toBeNull();
+
+      const newUser = await User.findOne({ email: conflictingEmail });
+      expect(newUser).toBeTruthy();
+      expect(newUser.rollNumber).toBe(rollNumber);
+      
+      // Update studentId, studentEmail, and plaintextOtp for subsequent tests
+      studentId = newUser._id;
+      studentEmail = conflictingEmail;
+      
+      const otpCall = sendOTPEmail.mock.calls.find(call => call[0] === studentEmail);
+      expect(otpCall).toBeTruthy();
+      plaintextOtp = otpCall[2];
     });
 
     test('verifyOTP for manual user keeps account isVerified = false but issues token', async () => {
