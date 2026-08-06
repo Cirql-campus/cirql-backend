@@ -85,6 +85,15 @@ const upload = multer({
   },
 });
 
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB for ID photos
+    files:    1,
+  },
+});
+
 // Multer error handler — converts multer errors to our standard format
 const validateFileMagicBytes = (req, res, next) => {
   if (!req.files || req.files.length === 0) return next();
@@ -111,4 +120,4 @@ const handleUploadError = (err, req, res, next) => {
   next();
 };
 
-module.exports = { upload, handleUploadError, requireCloudinaryConfig, validateFileMagicBytes };
+module.exports = { upload, memoryUpload, handleUploadError, requireCloudinaryConfig, validateFileMagicBytes };

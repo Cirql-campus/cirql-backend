@@ -8,7 +8,7 @@ const { authLimiter, otpLimiter } = require('../middleware/rateLimit.middleware'
 const { validate } = require('../middleware/validate.middleware');
 const { protect } = require('../middleware/auth.middleware');
 const asyncHandler = require('../middleware/asyncHandler');
-const { upload } = require('../middleware/upload.middleware');
+const { upload, memoryUpload, handleUploadError } = require('../middleware/upload.middleware');
 
 const passwordValidationRules = (field) => body(field)
   .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
@@ -119,7 +119,8 @@ router.post('/register/manual',
 
 router.post('/register/submit-id',
   protect,
-  upload.single('idPhoto'),
+  memoryUpload.single('idPhoto'),
+  handleUploadError,
   asyncHandler(authController.submitIDPhoto)
 );
 
