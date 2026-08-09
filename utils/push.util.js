@@ -69,6 +69,15 @@ const sendPushNotification = async (user, payload) => {
     safePayload.badge = badgeCount;
   }
 
+  // Always include the app icon so every notification shows the CirQl logo
+  if (!safePayload.icon) {
+    safePayload.icon = `${process.env.FRONTEND_URL || 'https://cirql.store'}/icon-192.png`;
+  }
+  // Badge icon for status bar
+  if (!safePayload.badgeIcon) {
+    safePayload.badgeIcon = `${process.env.FRONTEND_URL || 'https://cirql.store'}/icon-badge.png`;
+  }
+
   const payloadString = JSON.stringify(safePayload);
   const expiredEndpoints = [];
 

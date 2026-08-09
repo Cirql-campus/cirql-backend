@@ -340,12 +340,22 @@ exports.sendMessage = async (req, res) => {
     const receiver = await User.findById(receiverId);
     if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
       const preferences = receiver.notificationPreferences || {};
+      // Fetch the conversation's listing to get its first image for rich notification
+      let listingImage;
+      try {
+        const conv = await Conversation.findById(req.params.id)
+          .populate('listing', 'images title')
+          .lean();
+        listingImage = conv?.listing?.images?.[0] || undefined;
+      } catch { /* non-critical */ }
+
       await sendPushNotification(receiver, {
         title: `New message from ${message.sender.name}`,
         body: preferences.messagePreview ? safeText : 'Tap to view the message.',
         url: `${process.env.FRONTEND_URL}/messages/${req.params.id}`,
         tag: `message-${req.params.id}`,
         type: 'message',
+        image: listingImage,  // shows listing photo in notification — like Instagram post preview
         preferenceKey: 'messages',
       });
     }
