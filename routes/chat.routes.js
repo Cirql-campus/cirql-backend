@@ -24,7 +24,7 @@ router.post('/conversations',
   requireVerified,
   chatLimiter,
   [
-    body('listingId').isMongoId().withMessage('Invalid listing ID'),
+    body('listingId').optional().isMongoId().withMessage('Invalid listing ID'),
     body('sellerId').isMongoId().withMessage('Invalid seller ID'),
   ],
   validate,

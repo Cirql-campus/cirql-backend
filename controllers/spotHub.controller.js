@@ -48,10 +48,16 @@ exports.createPost = async (req, res) => {
       college: req.user.college,
     });
 
-    const populated = await SpotHubPost.findById(post._id).populate(
-      'poster',
-      'name initials avatar college isVerified rating reviewCount'
-    );
+    const populated = await SpotHubPost.findById(post._id).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
 
     return success(res, { post: populated }, 'Spot Hub post created successfully', 201);
   } catch (err) {
@@ -111,10 +117,16 @@ exports.getPosts = async (req, res) => {
       SpotHubPost.countDocuments(filter),
     ]);
 
-    const populatedPosts = await SpotHubPost.populate(posts, {
-      path: 'poster',
-      select: 'name initials avatar college isVerified rating reviewCount',
-    });
+    const populatedPosts = await SpotHubPost.populate(posts, [
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
 
     return success(res, {
       posts: populatedPosts,
@@ -160,10 +172,16 @@ exports.upvote = async (req, res) => {
       await SpotHubPost.updateOne({ _id: id }, { $addToSet: { upvotes: userId } });
     }
 
-    const updatedPost = await SpotHubPost.findById(id).populate(
-      'poster',
-      'name initials avatar college isVerified rating reviewCount'
-    );
+    const updatedPost = await SpotHubPost.findById(id).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
 
     return success(res, { post: updatedPost }, 'Upvote toggled successfully');
   } catch (err) {
@@ -200,10 +218,16 @@ exports.downvote = async (req, res) => {
       await SpotHubPost.updateOne({ _id: id }, { $addToSet: { downvotes: userId } });
     }
 
-    const updatedPost = await SpotHubPost.findById(id).populate(
-      'poster',
-      'name initials avatar college isVerified rating reviewCount'
-    );
+    const updatedPost = await SpotHubPost.findById(id).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
 
     return success(res, { post: updatedPost }, 'Downvote toggled successfully');
   } catch (err) {
@@ -222,7 +246,16 @@ exports.flagOutdated = async (req, res) => {
       id,
       { $set: { isOutdated: true } },
       { new: true }
-    ).populate('poster', 'name initials avatar college isVerified rating reviewCount');
+    ).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
 
     if (!post) return error(res, 'Post not found', 404);
 
@@ -252,6 +285,91 @@ exports.deletePost = async (req, res) => {
     await post.deleteOne();
 
     return success(res, null, 'Post deleted successfully');
+  } catch (err) {
+    throw err;
+  }
+};
+
+exports.addComment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return error(res, 'Invalid post ID', 400);
+    }
+    if (!text || !text.trim()) {
+      return error(res, 'Comment text is required', 400);
+    }
+    if (text.length > 500) {
+      return error(res, 'Comment text must be at most 500 characters', 400);
+    }
+
+    const post = await SpotHubPost.findById(id);
+    if (!post) return error(res, 'Post not found', 404);
+
+    post.comments.push({
+      poster: req.userId,
+      text: text.trim(),
+    });
+
+    await post.save();
+
+    const updatedPost = await SpotHubPost.findById(id).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
+
+    return success(res, { post: updatedPost }, 'Comment added successfully', 201);
+  } catch (err) {
+    throw err;
+  }
+};
+
+exports.deleteComment = async (req, res) => {
+  try {
+    const { id, commentId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(commentId)) {
+      return error(res, 'Invalid ID format', 400);
+    }
+
+    const post = await SpotHubPost.findById(id);
+    if (!post) return error(res, 'Post not found', 404);
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return error(res, 'Comment not found', 404);
+
+    const isAdmin =
+      req.user?.role === 'super_admin' ||
+      (req.user?.role === 'college_admin' && req.user.adminCollege === post.college);
+    
+    const isCommentPoster = comment.poster.toString() === req.userId;
+    const isPostPoster = post.poster.toString() === req.userId;
+
+    if (!isCommentPoster && !isPostPoster && !isAdmin) {
+      return error(res, 'Not authorised to delete this comment', 403);
+    }
+
+    comment.deleteOne();
+    await post.save();
+
+    const updatedPost = await SpotHubPost.findById(id).populate([
+      {
+        path: 'poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      },
+      {
+        path: 'comments.poster',
+        select: 'name initials avatar college isVerified rating reviewCount',
+      }
+    ]);
+
+    return success(res, { post: updatedPost }, 'Comment deleted successfully');
   } catch (err) {
     throw err;
   }

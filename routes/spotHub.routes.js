@@ -87,4 +87,23 @@ router.delete('/:id',
   asyncHandler(spotHubController.deletePost)
 );
 
+router.post('/:id/comments',
+  requireVerified,
+  [
+    param('id').isMongoId().withMessage('Invalid post ID'),
+    body('text').trim().notEmpty().withMessage('Comment text is required').isLength({ max: 500 }).withMessage('Comment must be at most 500 characters'),
+  ],
+  validate,
+  asyncHandler(spotHubController.addComment)
+);
+
+router.delete('/:id/comments/:commentId',
+  [
+    param('id').isMongoId().withMessage('Invalid post ID'),
+    param('commentId').isMongoId().withMessage('Invalid comment ID'),
+  ],
+  validate,
+  asyncHandler(spotHubController.deleteComment)
+);
+
 module.exports = router;

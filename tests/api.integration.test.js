@@ -1259,6 +1259,55 @@ describe('CirQl production integration flows', () => {
       expect(res.body.post.isOutdated).toBe(true);
     });
 
+    test('should add a comment successfully and return populated comment poster info', async () => {
+      const res = await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/comments`)
+        .send({ text: 'This place is awesome! Must visit during weekends.' })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.post.comments.length).toBe(1);
+      expect(res.body.post.comments[0].text).toBe('This place is awesome! Must visit during weekends.');
+      expect(res.body.post.comments[0].poster.name).toBe(buyer.user.name);
+    });
+
+    test('should reject comment if validation fails', async () => {
+      await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/comments`)
+        .send({ text: '' })
+        .expect(422);
+
+      await buyer.agent
+        .post(`/api/v1/spot-hub/${testPostId}/comments`)
+        .send({ text: 'a'.repeat(501) })
+        .expect(422);
+    });
+
+    test('should refuse deleting a comment from a non-author', async () => {
+      // Get the post with comments
+      const getRes = await seller.agent.get('/api/v1/spot-hub').expect(200);
+      const post = getRes.body.posts.find(p => p._id === testPostId);
+      const commentId = post.comments[0]._id;
+
+      // otherCollegeUser tries to delete comment posted by buyer
+      await otherCollegeUser.agent
+        .delete(`/api/v1/spot-hub/${testPostId}/comments/${commentId}`)
+        .expect(403);
+    });
+
+    test('should allow deleting a comment by the comment author', async () => {
+      const getRes = await seller.agent.get('/api/v1/spot-hub').expect(200);
+      const post = getRes.body.posts.find(p => p._id === testPostId);
+      const commentId = post.comments[0]._id;
+
+      const res = await buyer.agent
+        .delete(`/api/v1/spot-hub/${testPostId}/comments/${commentId}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.post.comments.length).toBe(0);
+    });
+
     test('should refuse deletion from non-poster non-admin', async () => {
       await buyer.agent
         .delete(`/api/v1/spot-hub/${testPostId}`)

@@ -148,11 +148,40 @@ exports.createOrGetConversation = async (req, res) => {
   try {
     const { listingId, sellerId } = req.body;
 
-    if (!isValidId(listingId) || !isValidId(sellerId)) {
-      return error(res, 'Invalid listingId or sellerId', 400);
+    if (!sellerId) {
+      return error(res, 'sellerId/userId is required', 400);
+    }
+    if (!isValidId(sellerId)) {
+      return error(res, 'Invalid sellerId', 400);
     }
     if (sellerId === req.userId) {
       return error(res, 'You cannot start a conversation with yourself', 400);
+    }
+
+    if (await hasBlockBetween(req.userId, sellerId)) {
+      return error(res, 'Conversation is unavailable', 403);
+    }
+
+    const participants = [req.userId, sellerId].sort();
+
+    // If listingId is not provided, find/create a direct message conversation
+    if (!listingId) {
+      let conversation = await Conversation.findOne({
+        participants: { $all: participants, $size: 2 },
+        listing: { $in: [null, undefined] },
+      }).populate('participants', 'name avatar initials isVerified');
+
+      if (!conversation) {
+        conversation = await Conversation.create({ participants, listing: null });
+        await conversation.populate([
+          { path: 'participants', select: 'name avatar initials isVerified' }
+        ]);
+      }
+      return success(res, { conversation }, 'Conversation ready');
+    }
+
+    if (!isValidId(listingId)) {
+      return error(res, 'Invalid listingId', 400);
     }
 
     const listing = await Listing.findOne({ _id: listingId, isActive: true })
@@ -165,12 +194,6 @@ exports.createOrGetConversation = async (req, res) => {
     if (!canStartConversationForListing(listing, req.user)) {
       return error(res, 'This listing is outside your campus or unavailable', 403);
     }
-
-    if (await hasBlockBetween(req.userId, sellerId)) {
-      return error(res, 'Conversation is unavailable', 403);
-    }
-
-    const participants = [req.userId, sellerId].sort();
 
     let conversation = await Conversation.findOne({
       participants: { $all: participants, $size: 2 },
@@ -191,10 +214,15 @@ exports.createOrGetConversation = async (req, res) => {
   } catch (err) {
     if (err.code === 11000) {
       try {
-        const conv = await Conversation.findOne({
-          participants: { $all: [req.userId, req.body.sellerId], $size: 2 },
-          listing: req.body.listingId,
-        })
+        const query = {
+          participants: { $all: [req.userId, req.body.sellerId], $size: 2 }
+        };
+        if (req.body.listingId) {
+          query.listing = req.body.listingId;
+        } else {
+          query.listing = { $in: [null, undefined] };
+        }
+        const conv = await Conversation.findOne(query)
           .populate('participants', 'name avatar initials isVerified')
           .populate('listing', 'title price images');
         if (conv) return success(res, { conversation: conv }, 'Conversation ready');

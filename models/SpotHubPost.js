@@ -70,6 +70,26 @@ const spotHubPostSchema = new mongoose.Schema({
     default: false,
     index: true,
   },
+  comments: {
+    type: [{
+      poster: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+      },
+      text: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 500,
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now,
+      }
+    }],
+    default: [],
+  },
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },
