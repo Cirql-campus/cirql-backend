@@ -1,21 +1,86 @@
 'use strict';
 const { success, error } = require('../utils/apiResponse');
-const { getPointSummary, spendPoints } = require('../utils/points.util');
+const { getPointSummary, spendPoints, awardPoints } = require('../utils/points.util');
 const { getTier, TIERS, SPEND_COSTS } = require('../config/points');
 const Listing = require('../models/Listing');
+const User = require('../models/User');
 
 // GET /api/v1/points/me — get current user's points and history
 exports.getMyPoints = async (req, res) => {
-  const summary = await getPointSummary(req.userId);
+  const [summary, user] = await Promise.all([
+    getPointSummary(req.userId),
+    User.findById(req.userId).select('lastCheckIn checkInStreak').lean()
+  ]);
   const tierInfo = getTier(summary.lifetimePoints);
   const nextTier = TIERS[TIERS.findIndex(t => t.name === tierInfo.name) + 1] || null;
 
   return success(res, {
     ...summary,
+    checkInStreak: user?.checkInStreak || 0,
+    lastCheckIn: user?.lastCheckIn || null,
     tierInfo,
     nextTier,
     pointsToNextTier: nextTier ? nextTier.minPoints - summary.lifetimePoints : 0,
   });
+};
+
+// POST /api/v1/points/check-in — claim daily check-in points
+exports.checkIn = async (req, res) => {
+  const user = await User.findById(req.userId);
+  if (!user) return error(res, 'User not found', 404);
+
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+
+  if (user.lastCheckIn) {
+    const lastStr = user.lastCheckIn.toISOString().split('T')[0];
+    if (lastStr === todayStr) {
+      return error(res, 'You have already checked in today', 400);
+    }
+
+    const lastDate = new Date(user.lastCheckIn);
+    lastDate.setUTCHours(0, 0, 0, 0);
+    const todayDate = new Date();
+    todayDate.setUTCHours(0, 0, 0, 0);
+    const diffTime = todayDate.getTime() - lastDate.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 1) {
+      user.checkInStreak += 1;
+    } else {
+      user.checkInStreak = 1;
+    }
+  } else {
+    user.checkInStreak = 1;
+  }
+
+  user.lastCheckIn = now;
+  await user.save();
+
+  await awardPoints(user._id, 'daily_check_in', {
+    note: `Daily check-in (Day ${user.checkInStreak})`,
+  });
+
+  let hasBonus = false;
+  if (user.checkInStreak > 0 && user.checkInStreak % 7 === 0) {
+    hasBonus = true;
+    await awardPoints(user._id, 'check_in_streak_7day', {
+      note: `7-day check-in streak bonus!`,
+    });
+  }
+
+  const summary = await getPointSummary(user._id);
+  const tierInfo = getTier(summary.lifetimePoints);
+  const nextTier = TIERS[TIERS.findIndex(t => t.name === tierInfo.name) + 1] || null;
+
+  return success(res, {
+    ...summary,
+    checkInStreak: user.checkInStreak,
+    lastCheckIn: user.lastCheckIn,
+    tierInfo,
+    nextTier,
+    pointsToNextTier: nextTier ? nextTier.minPoints - summary.lifetimePoints : 0,
+  }, hasBonus ? 'Checked in! Streak bonus awarded!' : 'Checked in successfully!');
 };
 
 // POST /api/v1/points/boost-listing/:listingId — spend 50 pts to boost a listing

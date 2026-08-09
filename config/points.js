@@ -10,6 +10,8 @@ const POINT_VALUES = {
   profile_completed:      5,
   account_30days:        10,
   account_90days:        10,
+  daily_check_in:         1,
+  check_in_streak_7day:  10,
   spend_boost_listing:  -50,
   spend_cross_college: -100,
 };

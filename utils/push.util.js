@@ -1,4 +1,5 @@
 const webpush = require('web-push');
+const mongoose = require('mongoose');
 const logger = require('./logger');
 
 const hasVapidConfig = () => Boolean(
@@ -36,7 +37,38 @@ const sendPushNotification = async (user, payload) => {
     return;
   }
 
+  // Calculate unread badge count dynamically if not already provided
+  let badgeCount = payload.badge;
+  if (badgeCount === undefined) {
+    try {
+      const Notification = mongoose.model('Notification');
+      const Conversation = mongoose.model('Conversation');
+      const Message = mongoose.model('Message');
+
+      const conversations = await Conversation.find({ participants: user._id })
+        .select('_id')
+        .lean();
+      const conversationIds = conversations.map(c => c._id);
+
+      const [unreadNotifications, unreadMessages] = await Promise.all([
+        Notification.countDocuments({ user: user._id, read: false }),
+        Message.countDocuments({
+          conversation: { $in: conversationIds },
+          sender: { $ne: user._id },
+          read: false,
+        }),
+      ]);
+      badgeCount = unreadNotifications + unreadMessages;
+    } catch (countErr) {
+      logger.warn(`Failed to calculate badge count for push: ${countErr.message}`);
+    }
+  }
+
   const { preferenceKey, ...safePayload } = payload;
+  if (badgeCount !== undefined) {
+    safePayload.badge = badgeCount;
+  }
+
   const payloadString = JSON.stringify(safePayload);
   const expiredEndpoints = [];
 

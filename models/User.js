@@ -103,6 +103,8 @@ const userSchema = new mongoose.Schema({
     enum: ['new', 'regular', 'trusted', 'star_seller', 'campus_legend'],
     default: 'new',
   },
+  lastCheckIn:   { type: Date, default: null },
+  checkInStreak: { type: Number, default: 0 },
   wishlist: [{
     type: mongoose.Schema.Types.ObjectId,
     ref:  'Listing',
@@ -219,6 +221,8 @@ userSchema.methods.toPublicJSON = function () {
     totalPoints:    this.totalPoints    || 0,
     lifetimePoints: this.lifetimePoints || 0,
     tier:           this.tier           || 'new',
+    lastCheckIn:    this.lastCheckIn    || null,
+    checkInStreak:  this.checkInStreak  || 0,
     wishlist:      this.wishlist,
     notificationPreferences: {
       ...DEFAULT_NOTIFICATION_PREFERENCES,

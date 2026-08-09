@@ -9,6 +9,8 @@ const pointsController = require('../controllers/points.controller');
 
 router.get('/me', protect, asyncHandler(pointsController.getMyPoints));
 
+router.post('/check-in', protect, asyncHandler(pointsController.checkIn));
+
 router.post('/boost-listing/:listingId',
   protect,
   [param('listingId').isMongoId().withMessage('Invalid listing ID')],

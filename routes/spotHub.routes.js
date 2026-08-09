@@ -21,9 +21,10 @@ router.use(protect);
 router.get('/',
   [
     query('category').optional().isIn(['all', 'food', 'shop', 'hangout', 'services', 'other']).withMessage('Invalid category'),
-    query('sort').optional().isIn(['new', 'top']).withMessage('Invalid sort parameter'),
+    query('sort').optional().isIn(['new', 'top', 'trending']).withMessage('Invalid sort parameter'),
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be 1-50'),
+    query('tag').optional().trim().isLength({ min: 1 }).withMessage('Tag must not be empty'),
   ],
   validate,
   asyncHandler(spotHubController.getPosts)
@@ -40,6 +41,27 @@ router.post('/',
     body('placeName').trim().notEmpty().withMessage('Place name is required').isLength({ min: 2, max: 80 }).withMessage('Place name must be 2 to 80 characters'),
     body('description').trim().notEmpty().withMessage('Description is required').isLength({ max: 400 }).withMessage('Description must be at most 400 characters'),
     body('category').isIn(['food', 'shop', 'hangout', 'services', 'other']).withMessage('Invalid category'),
+    body('tags').optional().custom((value, { req }) => {
+      let parsed = value;
+      if (typeof value === 'string') {
+        try {
+          parsed = JSON.parse(value);
+        } catch (e) {
+          parsed = value.split(',').map(t => t.trim()).filter(Boolean);
+        }
+      }
+      if (!Array.isArray(parsed)) {
+        throw new Error('Tags must be an array or a comma-separated list');
+      }
+      if (parsed.length > 5) {
+        throw new Error('Maximum 5 tags allowed');
+      }
+      if (!parsed.every(v => typeof v === 'string')) {
+        throw new Error('Tags must be strings');
+      }
+      req.body.tags = parsed;
+      return true;
+    }),
     body('images').optional().custom((value, { req }) => {
       if (req.files && req.files.length > 0) {
         if (req.files.length > 3) {

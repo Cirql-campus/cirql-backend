@@ -36,6 +36,14 @@ exports.markAllRead = async (req, res) => {
     { user: req.userId, read: false },
     { $set: { read: true } }
   );
+
+  try {
+    const { getIO } = require('../config/socket');
+    getIO().to(`user_${req.userId}`).emit('notifications_read', { all: true });
+  } catch (socketErr) {
+    // Ignore socket error
+  }
+
   return success(res, null, 'All notifications marked as read');
 };
 
@@ -46,5 +54,13 @@ exports.markOneRead = async (req, res) => {
     { new: true }
   );
   if (!notif) return error(res, 'Notification not found', 404);
+
+  try {
+    const { getIO } = require('../config/socket');
+    getIO().to(`user_${req.userId}`).emit('notifications_read', { id: req.params.id });
+  } catch (socketErr) {
+    // Ignore socket error
+  }
+
   return success(res, { notification: notif });
 };

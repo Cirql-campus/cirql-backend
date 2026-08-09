@@ -7,7 +7,7 @@ const logger = require('../utils/logger');
 
 exports.createPost = async (req, res) => {
   try {
-    const { placeName, description, category, images } = req.body;
+    const { placeName, description, category, images, tags } = req.body;
 
     let finalImages = [];
     if (req.files && req.files.length > 0) {
@@ -39,6 +39,19 @@ exports.createPost = async (req, res) => {
       return error(res, 'User college not found', 400);
     }
 
+    let parsedTags = [];
+    if (tags) {
+      if (Array.isArray(tags)) {
+        parsedTags = tags;
+      } else if (typeof tags === 'string') {
+        try {
+          parsedTags = JSON.parse(tags);
+        } catch (e) {
+          parsedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
+        }
+      }
+    }
+
     const post = await SpotHubPost.create({
       placeName: placeName.trim(),
       description: description.trim(),
@@ -46,6 +59,7 @@ exports.createPost = async (req, res) => {
       images: finalImages,
       poster: req.userId,
       college: req.user.college,
+      tags: parsedTags,
     });
 
     const populated = await SpotHubPost.findById(post._id).populate([
@@ -70,7 +84,7 @@ exports.createPost = async (req, res) => {
 
 exports.getPosts = async (req, res) => {
   try {
-    const { category, sort = 'new', page = 1, limit = 12 } = req.query;
+    const { category, sort = 'new', page = 1, limit = 12, tag } = req.query;
 
     if (!req.user?.college) {
       return error(res, 'User college not found', 400);
@@ -89,6 +103,10 @@ exports.getPosts = async (req, res) => {
       filter.category = String(category).toLowerCase().trim();
     }
 
+    if (tag) {
+      filter.tags = String(tag).toLowerCase().trim();
+    }
+
     const pipeline = [
       { $match: filter },
       {
@@ -103,7 +121,43 @@ exports.getPosts = async (req, res) => {
       },
     ];
 
-    if (sort === 'top') {
+    if (sort === 'trending') {
+      const now = new Date();
+      pipeline.push({
+        $addFields: {
+          hotScore: {
+            $let: {
+              vars: {
+                ageHours: {
+                  $max: [
+                    0.1,
+                    {
+                      $divide: [
+                        { $subtract: [now, '$createdAt'] },
+                        1000 * 60 * 60, // milliseconds to hours
+                      ],
+                    },
+                  ],
+                },
+                rawScore: {
+                  $subtract: [
+                    { $size: { $ifNull: ['$upvotes', []] } },
+                    { $size: { $ifNull: ['$downvotes', []] } },
+                  ],
+                },
+              },
+              in: {
+                $divide: [
+                  '$$rawScore',
+                  { $pow: [{ $add: ['$$ageHours', 2] }, 1.5] },
+                ],
+              },
+            },
+          },
+        },
+      });
+      pipeline.push({ $sort: { hotScore: -1, createdAt: -1 } });
+    } else if (sort === 'top') {
       pipeline.push({ $sort: { voteScore: -1, createdAt: -1 } });
     } else {
       pipeline.push({ $sort: { createdAt: -1 } });

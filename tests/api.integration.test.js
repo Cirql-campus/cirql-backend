@@ -1337,4 +1337,159 @@ describe('CirQl production integration flows', () => {
       expect(checkDb).toBeNull();
     });
   });
+
+  describe('Daily Check-in Streaks, Spot Hub Tags & Reddit Sort', () => {
+    let testUser;
+    
+    beforeAll(async () => {
+      testUser = await registerVerifiedUser({
+        name: 'Streaker Student',
+        email: 'streaker@kiet.edu',
+      });
+    });
+
+    test('should allow user to check in daily, earn points, increment streak, and enforce once-per-day checkin', async () => {
+      // First check-in
+      const res = await testUser.agent
+        .post('/api/v1/points/check-in')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.checkInStreak).toBe(1);
+      expect(res.body.totalPoints).toBe(1); // 1 point for check-in
+      expect(res.body.lastCheckIn).toBeDefined();
+
+      // Double check-in should fail
+      await testUser.agent
+        .post('/api/v1/points/check-in')
+        .expect(400);
+
+      // Simulate next day check-in by changing lastCheckIn in db
+      const User = mongoose.model('User');
+      const dbUser = await User.findById(testUser.user._id);
+      
+      // Move lastCheckIn to exactly 24 hours ago
+      dbUser.lastCheckIn = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await dbUser.save();
+
+      // Second check-in
+      const res2 = await testUser.agent
+        .post('/api/v1/points/check-in')
+        .expect(200);
+
+      expect(res2.body.checkInStreak).toBe(2);
+      expect(res2.body.totalPoints).toBe(2);
+
+      // Simulate a gap of 2 days (non-consecutive) to check streak reset
+      dbUser.lastCheckIn = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      await dbUser.save();
+
+      const res3 = await testUser.agent
+        .post('/api/v1/points/check-in')
+        .expect(200);
+
+      // Streak resets to 1
+      expect(res3.body.checkInStreak).toBe(1);
+      expect(res3.body.totalPoints).toBe(3);
+    });
+
+    test('should award 7-day streak bonus points', async () => {
+      const User = mongoose.model('User');
+      const dbUser = await User.findById(testUser.user._id);
+
+      // Set streak to 6 and lastCheckIn to yesterday
+      dbUser.checkInStreak = 6;
+      dbUser.lastCheckIn = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await dbUser.save();
+
+      const res = await testUser.agent
+        .post('/api/v1/points/check-in')
+        .expect(200);
+
+      expect(res.body.checkInStreak).toBe(7);
+      // Earned: +1 for checkin, +10 for streak bonus. Previous balance was 3. Total = 3 + 1 + 10 = 14
+      expect(res.body.totalPoints).toBe(14);
+    });
+
+    test('should allow creating, filtering and searching Spot Hub posts by tags', async () => {
+      // Create post with tags
+      const res = await testUser.agent
+        .post('/api/v1/spot-hub')
+        .send({
+          placeName: 'Tech Library',
+          description: 'Quite space with strong wifi',
+          category: 'hangout',
+          images: ['https://res.cloudinary.com/test/image.jpg'],
+          tags: 'Library, study, silent, quiet, wifi'
+        })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.post.tags).toEqual(['library', 'study', 'silent', 'quiet', 'wifi']);
+
+      // Filter by tag
+      const filterRes = await testUser.agent
+        .get('/api/v1/spot-hub?tag=study')
+        .expect(200);
+      
+      expect(filterRes.body.success).toBe(true);
+      expect(filterRes.body.posts.length).toBeGreaterThan(0);
+      expect(filterRes.body.posts[0].placeName).toBe('Tech Library');
+
+      // Filter by nonexistent tag
+      const filterResEmpty = await testUser.agent
+        .get('/api/v1/spot-hub?tag=nonexistent')
+        .expect(200);
+
+      expect(filterResEmpty.body.success).toBe(true);
+      expect(filterResEmpty.body.posts.length).toBe(0);
+    });
+
+    test('should sort Spot Hub posts by trending score decay (Reddit style)', async () => {
+      const SpotHubPost = mongoose.model('SpotHubPost');
+      
+      // Clear any existing active posts for clean comparison
+      await SpotHubPost.deleteMany({ college: testUser.user.college });
+
+      // Create Post A (Newer, 0 upvotes)
+      const postA = await SpotHubPost.create({
+        placeName: 'Fresh Cafe',
+        description: 'Just opened today',
+        category: 'food',
+        images: ['https://res.cloudinary.com/test/image.jpg'],
+        poster: testUser.user._id,
+        college: testUser.user.college,
+        createdAt: new Date(),
+      });
+
+      // Create Post B (Older, but has high upvotes)
+      const postB = await SpotHubPost.create({
+        placeName: 'Popular Library',
+        description: 'Always good',
+        category: 'hangout',
+        images: ['https://res.cloudinary.com/test/image.jpg'],
+        poster: testUser.user._id,
+        college: testUser.user.college,
+        createdAt: new Date(Date.now() - 3 * 3600000), // 3 hours ago
+        upvotes: [new mongoose.Types.ObjectId(), new mongoose.Types.ObjectId(), new mongoose.Types.ObjectId()] // 3 upvotes
+      });
+
+      // Fetch sorting by trending (Reddit style)
+      const trendingRes = await testUser.agent
+        .get('/api/v1/spot-hub?sort=trending')
+        .expect(200);
+
+      expect(trendingRes.body.success).toBe(true);
+      expect(trendingRes.body.posts[0].placeName).toBe('Popular Library');
+      expect(trendingRes.body.posts[1].placeName).toBe('Fresh Cafe');
+
+      // Fetch sorting by new
+      const newRes = await testUser.agent
+        .get('/api/v1/spot-hub?sort=new')
+        .expect(200);
+
+      expect(newRes.body.posts[0].placeName).toBe('Fresh Cafe');
+      expect(newRes.body.posts[1].placeName).toBe('Popular Library');
+    });
+  });
 });

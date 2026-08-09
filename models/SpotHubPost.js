@@ -16,6 +16,14 @@ const spotHubPostSchema = new mongoose.Schema({
     trim: true,
     maxlength: [400, 'Description must be at most 400 characters'],
   },
+  tags: {
+    type: [String],
+    validate: {
+      validator: arr => arr.length <= 5,
+      message: 'Maximum 5 tags allowed',
+    },
+    default: [],
+  },
   category: {
     type: String,
     required: [true, 'Category is required'],
@@ -96,11 +104,29 @@ const spotHubPostSchema = new mongoose.Schema({
   toObject: { virtuals: true },
 });
 
+spotHubPostSchema.pre('save', function (next) {
+  if (this.isModified('tags') && Array.isArray(this.tags)) {
+    this.tags = [...new Set(
+      this.tags
+        .map(tag => String(tag || '').trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 5)
+    )];
+  }
+  next();
+});
+
 spotHubPostSchema.virtual('voteScore').get(function () {
   const up = this.upvotes ? this.upvotes.length : 0;
   const down = this.downvotes ? this.downvotes.length : 0;
   return up - down;
 });
+
+// Text Search Index
+spotHubPostSchema.index(
+  { placeName: 'text', description: 'text', tags: 'text' },
+  { weights: { placeName: 10, tags: 5, description: 1 }, name: 'SpotTextSearch' }
+);
 
 spotHubPostSchema.index({ college: 1, status: 1, createdAt: -1 });
 spotHubPostSchema.index({ poster: 1, status: 1, createdAt: -1 });

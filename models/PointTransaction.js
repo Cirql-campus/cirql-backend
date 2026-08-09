@@ -14,6 +14,8 @@ const POINT_ACTIONS = [
   'profile_completed',    // +5  — one-time: avatar + bio filled in
   'account_30days',       // +10 — one-time milestone: 30 days on platform
   'account_90days',       // +10 — one-time milestone: 90 days on platform
+  'daily_check_in',       // +1 — daily check-in
+  'check_in_streak_7day', // +10 — 7-day check-in streak bonus
   'spend_boost_listing',  // -50 — spent to boost a listing to top
   'spend_cross_college',  // -100 — spent to show listing at another college
 ];
