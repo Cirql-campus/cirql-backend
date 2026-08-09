@@ -73,6 +73,7 @@ const applyTestEnv = (mongoUri) => {
   process.env.ALLOWED_COLLEGE_DOMAINS = 'kiet.edu,akgec.ac.in';
   process.env.ADMIN_EMAILS = 'admin@kiet.edu';
   process.env.BCRYPT_ROUNDS = '4';
+  process.env.CSRF_REQUIRE_TOKEN = 'false';
 };
 
 const waitForDatabase = async () => {
@@ -243,6 +244,8 @@ describe('CirQl production integration flows', () => {
   });
 
   test('browser cookie writes are origin-protected and support CSRF tokens', async () => {
+    process.env.CSRF_REQUIRE_TOKEN = 'false';
+
     const csrfUser = await registerVerifiedUser({
       name: 'Csrf Student',
       email: 'csrf@kiet.edu',
@@ -252,6 +255,8 @@ describe('CirQl production integration flows', () => {
       .post('/api/v1/auth/logout')
       .set('Origin', 'http://localhost:5173')
       .expect(200);
+
+    process.env.CSRF_REQUIRE_TOKEN = 'true';
 
     const csrfUserWithToken = await registerVerifiedUser({
       name: 'Csrf Token Student',
@@ -263,6 +268,13 @@ describe('CirQl production integration flows', () => {
       .set('Origin', 'http://localhost:5173')
       .expect(200);
 
+    // If token is required, it must reject requests lacking it
+    await csrfUserWithToken.agent
+      .post('/api/v1/auth/logout')
+      .set('Origin', 'http://localhost:5173')
+      .expect(403);
+
+    // If token is required, it must accept requests containing the correct token
     await csrfUserWithToken.agent
       .post('/api/v1/auth/logout')
       .set('Origin', 'http://localhost:5173')
@@ -278,6 +290,8 @@ describe('CirQl production integration flows', () => {
       .post('/api/v1/auth/logout')
       .set('Origin', 'https://evil.example')
       .expect(403);
+
+    process.env.CSRF_REQUIRE_TOKEN = 'false';
   });
 
   test('auth cookies can be configured for cross-site frontend deployments', async () => {

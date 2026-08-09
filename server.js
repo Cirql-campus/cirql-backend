@@ -129,7 +129,12 @@ if (cluster.isPrimary && shouldUseCluster) {
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
-          connectSrc: ["'self'"],
+          connectSrc: [
+            "'self'",
+            ...allowedOrigins,
+            "https://cirql-backend.onrender.com",
+            "wss://cirql-backend.onrender.com",
+          ],
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameSrc: ["'none'"],

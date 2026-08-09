@@ -397,7 +397,13 @@ exports.resendOTP = async (req, res) => {
       "+verifyOTPExpiry +otpAttempts +verifyOTPHash",
     );
 
-    if (!user) return error(res, "No account found for this email", 404);
+    if (!user) {
+      return success(
+        res,
+        {},
+        "If an account exists, a new OTP has been sent.",
+      );
+    }
     if (user.isVerified) return error(res, "Email already verified", 400);
 
     if (
