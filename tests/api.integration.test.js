@@ -61,7 +61,7 @@ const applyTestEnv = (mongoUri) => {
   process.env.JWT_SECRET = 'test_jwt_secret_64_byte_value_for_integration_suite';
   process.env.JWT_REFRESH_SECRET = 'test_refresh_secret_64_byte_value_for_integration_suite';
   process.env.JWT_EXPIRES_IN = '15m';
-  process.env.JWT_REFRESH_EXPIRES_IN = '30d';
+  process.env.REFRESH_TOKEN_TTL_DAYS = '45';
   process.env.FIELD_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
   process.env.EMAIL_HOST = 'smtp.test.local';
   process.env.EMAIL_USER = 'test-user';
@@ -429,6 +429,50 @@ describe('CirQl production integration flows', () => {
       .expect(200);
   });
 
+  test('login keeps the device signed in for 45 days (cookie, JWT and DB record agree)', async () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const longSessionUser = await registerVerifiedUser({
+      name: 'Long Session Student',
+      email: 'long-session@kiet.edu',
+    });
+
+    const before = Date.now();
+    const loginRes = await longSessionUser.agent
+      .post('/api/v1/auth/login')
+      .send({ email: 'long-session@kiet.edu', password: TEST_PASSWORD })
+      .expect(200);
+    const after = Date.now();
+
+    const refreshCookie = (loginRes.headers['set-cookie'] || [])
+      .find(cookie => cookie.startsWith('cirql_refresh='));
+    expect(refreshCookie).toBeTruthy();
+
+    // 1. Cookie lifetime: Max-Age is 45 days.
+    const maxAge = Number(/Max-Age=(\d+)/i.exec(refreshCookie)?.[1]);
+    expect(maxAge).toBe(45 * 24 * 60 * 60);
+
+    // 2. JWT lifetime: exp - iat is 45 days.
+    const jwt = require('jsonwebtoken');
+    const refreshJwt = decodeURIComponent(refreshCookie.split(';')[0].split('=')[1]);
+    const decoded = jwt.decode(refreshJwt);
+    expect(decoded.exp - decoded.iat).toBe(45 * 24 * 60 * 60);
+
+    // 3. DB record lifetime: expiresAt is ~45 days from login.
+    const RefreshToken = require('../models/RefreshToken');
+    const record = await RefreshToken.findOne({ userId: decoded.id }).sort({ createdAt: -1 });
+    expect(record).toBeTruthy();
+    expect(record.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 45 * DAY_MS - 1000);
+    expect(record.expiresAt.getTime()).toBeLessThanOrEqual(after + 45 * DAY_MS + 1000);
+
+    // 4. Refreshing starts a brand-new 45-day window (sliding session).
+    const refreshRes = await longSessionUser.agent
+      .post('/api/v1/auth/refresh')
+      .expect(200);
+    const rotatedCookie = (refreshRes.headers['set-cookie'] || [])
+      .find(cookie => cookie.startsWith('cirql_refresh='));
+    expect(Number(/Max-Age=(\d+)/i.exec(rotatedCookie)?.[1])).toBe(45 * 24 * 60 * 60);
+  });
+
   test('refresh-token reuse detection invalidates the reused session', async () => {
     const refreshUser = await registerVerifiedUser({
       name: 'Refresh Student',
@@ -506,13 +550,20 @@ describe('CirQl production integration flows', () => {
       },
     });
 
-    await otherCollegeUser.agent
+    // A verified student from another campus can open the item (Other Campuses page)...
+    const otherCampusDetailRes = await otherCollegeUser.agent
       .get(`/api/v1/listings/${listing._id}`)
-      .expect(404);
+      .expect(200);
+    expect(otherCampusDetailRes.body.listing._id).toBe(listing._id);
 
     await Listing.updateOne({ _id: listing._id }, { $set: { moderationStatus: 'pending' } });
 
     await buyer.agent
+      .get(`/api/v1/listings/${listing._id}?moderation=pending`)
+      .expect(404);
+
+    // ...but a listing that is not approved stays hidden from every other student.
+    await otherCollegeUser.agent
       .get(`/api/v1/listings/${listing._id}?moderation=pending`)
       .expect(404);
 
@@ -521,6 +572,142 @@ describe('CirQl production integration flows', () => {
       .expect(200);
 
     await Listing.updateOne({ _id: listing._id }, { $set: { moderationStatus: 'approved' } });
+  });
+
+  test('other-campuses lists only live listings from other campuses and lets students message the seller', async () => {
+    const { flushPublicListingCaches } = require('../controllers/listing.controller');
+    const User = require('../models/User');
+    const ownCollege = otherCollegeUser.user.college;
+    const listingCollege = seller.user.college;
+    expect(listingCollege).toBeTruthy();
+    expect(ownCollege).toBeTruthy();
+    expect(ownCollege).not.toBe(listingCollege);
+
+    const query = (qs = '') => otherCollegeUser.agent.get(`/api/v1/listings/other-campuses${qs ? `?${qs}` : ''}`);
+    const idsOf = (res) => res.body.listings.map(item => item._id);
+
+    // Authentication is required.
+    await request(app).get('/api/v1/listings/other-campuses').expect(401);
+    await request(app).get('/api/v1/listings/other-campuses/colleges').expect(401);
+
+    // A student on the listing's own campus does not see it here — that is the normal feed.
+    const sameCampusRes = await buyer.agent
+      .get('/api/v1/listings/other-campuses?limit=30')
+      .expect(200);
+    expect(idsOf(sameCampusRes)).not.toContain(listing._id);
+
+    // A verified student from another campus does, with public seller info only.
+    const otherRes = await query('limit=30').expect(200);
+    expect(otherRes.body.success).toBe(true);
+    expect(otherRes.body.pagination).toMatchObject({ page: 1, limit: 30, hasMore: false });
+    const found = otherRes.body.listings.find(item => item._id === listing._id);
+    expect(found).toMatchObject({
+      title: 'Arduino Uno Starter Kit',
+      college: listingCollege,
+      seller: { _id: seller.user._id, name: 'Seller Student' },
+    });
+    expect(found.seller.email).toBeUndefined();
+    otherRes.body.listings.forEach(item => expect(item.college).not.toBe(ownCollege));
+
+    // Campus chips: other campuses with their live item counts, never your own.
+    const collegesRes = await otherCollegeUser.agent
+      .get('/api/v1/listings/other-campuses/colleges')
+      .expect(200);
+    expect(collegesRes.body.colleges).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: listingCollege, count: expect.any(Number) })])
+    );
+    expect(collegesRes.body.colleges.map(c => c.name)).not.toContain(ownCollege);
+
+    // Filters.
+    expect(idsOf(await query(`college=${encodeURIComponent(listingCollege)}`).expect(200))).toContain(listing._id);
+    expect(idsOf(await query('college=Some%20Unknown%20College').expect(200))).toEqual([]);
+    expect(idsOf(await query(`college=${encodeURIComponent(ownCollege)}`).expect(200))).toEqual([]);
+    expect(idsOf(await query('category=tech').expect(200))).toContain(listing._id);
+    expect(idsOf(await query('category=living').expect(200))).not.toContain(listing._id);
+    expect(idsOf(await query('type=rent').expect(200))).not.toContain(listing._id);
+    expect(idsOf(await query('minPrice=1000').expect(200))).not.toContain(listing._id);
+    expect(idsOf(await query('maxPrice=1000').expect(200))).toContain(listing._id);
+    expect(idsOf(await query('search=Arduino').expect(200))).toContain(listing._id);
+    expect(idsOf(await query('search=zzzzqqqq').expect(200))).toEqual([]);
+    await query('sort=price_asc').expect(200);
+    await query('sort=price_desc').expect(200);
+    await query('sort=bogus').expect(422);
+    await query('limit=500').expect(422);
+    await query('page=0').expect(422);
+    // Operator-injection attempts via the query string must never reach Mongo or 500.
+    const injected = await query('college[$ne]=x');
+    expect([200, 422]).toContain(injected.status);
+
+    // Offset pagination stays correct for a price sort (an _id cursor would not).
+    const pagedReq = seller.agent
+      .post('/api/v1/listings')
+      .field('title', 'Pagination Test Item')
+      .field('description', 'Second listing used to test other-campus pagination.')
+      .field('price', '150')
+      .field('category', 'tech')
+      .field('type', 'sell')
+      .field('condition', 'Good')
+      .field('location', 'Library');
+    const pagedRes = await attachListingImage(pagedReq).expect(201);
+    const pagedListingId = pagedRes.body.listing._id;
+    try {
+      const page1 = await query('sort=price_asc&limit=1&page=1').expect(200);
+      expect(page1.body.pagination).toMatchObject({ page: 1, limit: 1, hasMore: true });
+      expect(idsOf(page1)).toEqual([pagedListingId]);
+
+      const page2 = await query('sort=price_asc&limit=1&page=2').expect(200);
+      expect(page2.body.pagination).toMatchObject({ page: 2, limit: 1 });
+      expect(idsOf(page2)).toHaveLength(1);
+      expect(idsOf(page2)[0]).not.toBe(pagedListingId);
+    } finally {
+      await Listing.deleteOne({ _id: pagedListingId });
+      await flushPublicListingCaches();
+    }
+
+    // Messaging across campuses: start a chat with the seller and exchange a message.
+    const conversationRes = await otherCollegeUser.agent
+      .post('/api/v1/chat/conversations')
+      .send({ listingId: listing._id, sellerId: seller.user._id })
+      .expect(200);
+    const crossConversationId = conversationRes.body.conversation._id;
+    await otherCollegeUser.agent
+      .post(`/api/v1/chat/conversations/${crossConversationId}/messages`)
+      .send({ text: 'Hi! Is the Arduino kit still available? I am from another campus.' })
+      .expect(201);
+    const sellerInbox = await seller.agent
+      .get(`/api/v1/chat/conversations/${crossConversationId}/messages`)
+      .expect(200);
+    expect(sellerInbox.body.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('another campus') })])
+    );
+
+    // A listing that is not approved is invisible and cannot be messaged from another campus.
+    await Listing.updateOne({ _id: listing._id }, { $set: { moderationStatus: 'pending' } });
+    await flushPublicListingCaches();
+    try {
+      expect(idsOf(await query('limit=30').expect(200))).not.toContain(listing._id);
+      await otherCollegeUser.agent
+        .post('/api/v1/chat/conversations')
+        .send({ listingId: listing._id, sellerId: seller.user._id })
+        .expect(403);
+    } finally {
+      await Listing.updateOne({ _id: listing._id }, { $set: { moderationStatus: 'approved' } });
+      await flushPublicListingCaches();
+    }
+
+    // Unverified accounts cannot browse, open, or message across campuses.
+    const unverified = await registerVerifiedUser({
+      name: 'Unverified Cross Campus',
+      email: 'unverified-cross@akgec.ac.in',
+    });
+    await User.updateOne({ _id: unverified.user._id }, { $set: { isVerified: false } });
+    await unverified.agent.get('/api/v1/listings/other-campuses').expect(403);
+    await unverified.agent.get('/api/v1/listings/other-campuses/colleges').expect(403);
+    await unverified.agent.get(`/api/v1/listings/${listing._id}`).expect(404);
+    await unverified.agent
+      .post('/api/v1/chat/conversations')
+      .send({ listingId: listing._id, sellerId: seller.user._id })
+      .expect(403);
   });
 
   test('category detail is authenticated, campus scoped, and moderation aware', async () => {
@@ -624,10 +811,12 @@ describe('CirQl production integration flows', () => {
   });
 
   test('chat creates a conversation and persists messages through REST', async () => {
-    await otherCollegeUser.agent
+    // Students from other campuses can message the seller of a live listing.
+    const crossCampusConversationRes = await otherCollegeUser.agent
       .post('/api/v1/chat/conversations')
       .send({ listingId: listing._id, sellerId: seller.user._id })
-      .expect(403);
+      .expect(200);
+    expect(crossCampusConversationRes.body.conversation._id).toEqual(expect.any(String));
 
     const conversationRes = await buyer.agent
       .post('/api/v1/chat/conversations')
