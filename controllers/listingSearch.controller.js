@@ -1,6 +1,9 @@
 'use strict';
 const mongoose = require('mongoose');
 const Listing = require('../models/Listing');
+const User = require('../models/User');
+const College = require('../models/College');
+const { COLLEGE_MAP } = require('../utils/collegeDetect');
 const { success, error } = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const {
@@ -224,22 +227,47 @@ exports.getOtherCampusColleges = async (req, res) => {
   }
   res.setHeader('X-Cache', 'MISS');
 
-  const rows = await Listing.aggregate([
-    {
-      $match: {
-        isActive: true,
-        moderationStatus: APPROVED_MODERATION_FILTER,
-        status: { $in: OTHER_CAMPUS_STATUSES },
-        college: { $nin: [ownCollege, '', null] },
+  const [rows, userColleges, registeredColleges] = await Promise.all([
+    Listing.aggregate([
+      {
+        $match: {
+          isActive: true,
+          moderationStatus: APPROVED_MODERATION_FILTER,
+          status: { $in: OTHER_CAMPUS_STATUSES },
+          college: { $nin: [ownCollege, '', null] },
+        },
       },
-    },
-    { $group: { _id: '$college', count: { $sum: 1 } } },
-    { $sort: { count: -1, _id: 1 } },
-    { $limit: 100 },
+      { $group: { _id: '$college', count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 100 },
+    ]),
+    User.distinct('college'),
+    College.find({ isActive: true }).select('name').lean(),
   ]);
 
+  const counts = new Map(rows.map(row => [row._id, row.count]));
+
+  // Every campus CirQl knows about (supported colleges, admin-added colleges, and
+  // colleges students actually signed up with) so the page can show a full campus
+  // directory — campuses with no items yet show up with a count of 0.
+  const knownNames = new Set(
+    [
+      ...COLLEGE_MAP.map(entry => entry.name),
+      ...registeredColleges.map(entry => entry.name),
+      ...userColleges,
+      ...counts.keys(),
+    ]
+      .map(name => String(name || '').trim())
+      .filter(name => name && name !== ownCollege)
+  );
+
   const payload = {
+    // Campuses that currently have live items (drives the chips).
     colleges: rows.map(row => ({ name: row._id, count: row.count })),
+    // Every other campus, items or not (drives the "Find a campus" picker).
+    allColleges: [...knownNames]
+      .map(name => ({ name, count: counts.get(name) || 0 }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
   };
   await setCacheValue(listingCache, 'listings', cacheKey, payload, 60);
   return success(res, payload);

@@ -618,6 +618,16 @@ describe('CirQl production integration flows', () => {
     );
     expect(collegesRes.body.colleges.map(c => c.name)).not.toContain(ownCollege);
 
+    // Campus directory: every known campus is listed, those without items with count 0.
+    expect(collegesRes.body.allColleges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: listingCollege, count: expect.any(Number) }),
+        expect.objectContaining({ name: 'HIMT Group of Institutions', count: 0 }),
+      ])
+    );
+    expect(collegesRes.body.allColleges.map(c => c.name)).not.toContain(ownCollege);
+    expect(collegesRes.body.allColleges.find(c => c.name === listingCollege).count).toBeGreaterThanOrEqual(1);
+
     // Filters.
     expect(idsOf(await query(`college=${encodeURIComponent(listingCollege)}`).expect(200))).toContain(listing._id);
     expect(idsOf(await query('college=Some%20Unknown%20College').expect(200))).toEqual([]);
