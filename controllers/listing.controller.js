@@ -30,17 +30,25 @@ const getCampusScope = (req) => {
   };
 };
 
+const isListingLive = (listing) => Boolean(
+  listing.isActive &&
+  ['approved', null, undefined].includes(listing.moderationStatus) &&
+  !['hidden', 'expired'].includes(listing.status)
+);
+
+// A listing is visible to:
+//   - admins and its own seller (always),
+//   - any student on the same campus (live listings),
+//   - any VERIFIED student on another campus (live listings) — this powers the
+//     "Other campuses" page. Pending / hidden / expired / inactive listings stay
+//     private to their own campus staff and seller either way.
 const isPublicListingVisibleToUser = (listing, user) => {
   if (!listing || !user) return false;
   if (user.role === 'super_admin' || user.role === 'college_admin') return true;
   if (idToString(listing.seller) === idToString(user)) return true;
-  return Boolean(
-    listing.isActive &&
-    ['approved', null, undefined].includes(listing.moderationStatus) &&
-    !['hidden', 'expired'].includes(listing.status) &&
-    listing.college &&
-    listing.college === user.college
-  );
+  if (!isListingLive(listing) || !listing.college) return false;
+  if (listing.college === user.college) return true;
+  return user.isVerified === true;
 };
 
 const ALLOWED_UPDATE_FIELDS = [

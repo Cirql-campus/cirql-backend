@@ -35,15 +35,18 @@ const hasBlockBetween = async (userA, userB) => {
   }));
 };
 
+// Students can message the seller of any live listing — on their own campus or,
+// if they are verified, on another campus (the "Other campuses" page).
 const canStartConversationForListing = (listing, user) => {
   if (!listing || !user) return false;
   if (user.role === 'super_admin' || user.role === 'college_admin') return true;
-  return Boolean(
-    listing.college &&
-    listing.college === user.college &&
+  if (!listing.college) return false;
+  const isLive =
     ['approved', null, undefined].includes(listing.moderationStatus) &&
-    !['hidden', 'expired'].includes(listing.status)
-  );
+    !['hidden', 'expired'].includes(listing.status);
+  if (!isLive) return false;
+  if (listing.college === user.college) return true;
+  return user.isVerified === true;
 };
 
 const notifyAdmins = async ({ text, link }) => {
@@ -192,7 +195,7 @@ exports.createOrGetConversation = async (req, res) => {
       return error(res, 'Seller does not own this listing', 400);
     }
     if (!canStartConversationForListing(listing, req.user)) {
-      return error(res, 'This listing is outside your campus or unavailable', 403);
+      return error(res, 'This listing is unavailable', 403);
     }
 
     let conversation = await Conversation.findOne({

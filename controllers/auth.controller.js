@@ -11,6 +11,7 @@ const { sendOTPEmail, sendResetEmail, sendVerificationRequestEmail } = require("
 const logger = require("../utils/logger");
 const { buildCookieOptions } = require("../utils/cookieOptions");
 const { isSuperAdminEmail } = require("../utils/adminEmails");
+const { getRefreshTokenTtlMs } = require("../config/session");
 const Notification = require("../models/Notification");
 const cloudinary = require("../config/cloudinary");
 
@@ -71,15 +72,19 @@ const issueTokens = async (user, res) => {
   const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || "15m",
   });
+  // One shared lifetime (45 days by default) for the JWT, the DB record and the
+  // cookie — see config/session.js. Each /auth/refresh rotates the token and
+  // starts a new window, so an active device stays logged in indefinitely.
+  const refreshTtlMs = getRefreshTokenTtlMs();
   const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
+    expiresIn: Math.floor(refreshTtlMs / 1000),
   });
 
   const tokenHash = crypto
     .createHash("sha256")
     .update(refreshToken)
     .digest("hex");
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+  const expiresAt = new Date(Date.now() + refreshTtlMs);
   await RefreshToken.create({ userId: user._id, tokenHash, expiresAt });
 
   res.cookie("cirql_access", accessToken, {
@@ -88,7 +93,7 @@ const issueTokens = async (user, res) => {
   });
   res.cookie("cirql_refresh", refreshToken, {
     ...cookieBase(),
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    maxAge: refreshTtlMs,
   });
 
   return { accessToken, refreshToken };

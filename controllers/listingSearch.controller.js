@@ -186,3 +186,139 @@ exports.getSearchSuggestions = async (req, res) => {
 
   return success(res, { suggestions });
 };
+
+// ═════════════════════════════════════════════════════════════════════════════
+// OTHER CAMPUSES
+// Read-only browsing of live listings from every campus EXCEPT the viewer's own.
+// The regular /listings feed stays strictly campus-scoped; these endpoints are
+// the only place where cross-campus listings are exposed, and they only return
+// approved, active, not-hidden/expired listings.
+// ═════════════════════════════════════════════════════════════════════════════
+const OTHER_CAMPUS_SORTS = {
+  newest:     { createdAt: -1, _id: -1 },
+  price_asc:  { price: 1,  _id: -1 },
+  price_desc: { price: -1, _id: -1 },
+};
+const OTHER_CAMPUS_STATUSES = ['available', 'reserved', null];
+const OTHER_CAMPUS_MAX_PAGE = 100;
+const OTHER_CAMPUS_SELLER_FIELDS = 'name avatar initials college rating reviewCount isVerified';
+const OTHER_CAMPUS_LISTING_FIELDS = [
+  'title', 'price', 'originalPrice', 'isNegotiable', 'quantity', 'category', 'type',
+  'status', 'condition', 'images', 'coverImageIndex', 'seller', 'college', 'location',
+  'pickupLocation', 'tags', 'brand', 'model', 'views', 'isActive', 'isSold', 'createdAt',
+].join(' ');
+
+// Query-string values can arrive as arrays/objects (?college[$ne]=x). Only ever
+// accept plain strings so they can't be smuggled into a Mongo operator.
+const asPlainString = (value) => (typeof value === 'string' ? value.trim() : '');
+const ownCollegeOf = (req) => String(req.user?.college || '').trim();
+
+// ─── GET /api/v1/listings/other-campuses/colleges ─────────────────────────────
+exports.getOtherCampusColleges = async (req, res) => {
+  const ownCollege = ownCollegeOf(req);
+  const cacheKey = `other-campuses:colleges:${ownCollege}`;
+  const cached = await getCacheValue(listingCache, 'listings', cacheKey);
+  if (cached) {
+    res.setHeader('X-Cache', 'HIT');
+    return success(res, cached);
+  }
+  res.setHeader('X-Cache', 'MISS');
+
+  const rows = await Listing.aggregate([
+    {
+      $match: {
+        isActive: true,
+        moderationStatus: APPROVED_MODERATION_FILTER,
+        status: { $in: OTHER_CAMPUS_STATUSES },
+        college: { $nin: [ownCollege, '', null] },
+      },
+    },
+    { $group: { _id: '$college', count: { $sum: 1 } } },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: 100 },
+  ]);
+
+  const payload = {
+    colleges: rows.map(row => ({ name: row._id, count: row.count })),
+  };
+  await setCacheValue(listingCache, 'listings', cacheKey, payload, 60);
+  return success(res, payload);
+};
+
+// ─── GET /api/v1/listings/other-campuses ──────────────────────────────────────
+exports.getOtherCampusListings = async (req, res) => {
+  const ownCollege = ownCollegeOf(req);
+
+  const college   = asPlainString(req.query.college);
+  const search    = asPlainString(req.query.search).slice(0, 100);
+  const category  = asPlainString(req.query.category).toLowerCase();
+  const type      = asPlainString(req.query.type);
+  const sortParam = asPlainString(req.query.sort);
+  const sort      = Object.prototype.hasOwnProperty.call(OTHER_CAMPUS_SORTS, sortParam)
+    ? sortParam
+    : 'newest';
+  const page      = Math.min(OTHER_CAMPUS_MAX_PAGE, Math.max(1, parseInt(req.query.page, 10) || 1));
+  const limit     = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 12));
+
+  const emptyPayload = { listings: [], pagination: { page, limit, hasMore: false } };
+
+  // Asking for your own campus here is meaningless — that's the normal feed.
+  if (college && college === ownCollege) return success(res, emptyPayload);
+
+  const cacheKey = `other-campuses:list:${ownCollege}:${req.originalUrl}`;
+  const cached = await getCacheValue(listingCache, 'listings', cacheKey);
+  if (cached) {
+    res.setHeader('X-Cache', 'HIT');
+    return success(res, cached);
+  }
+  res.setHeader('X-Cache', 'MISS');
+
+  const filter = {
+    isActive: true,
+    moderationStatus: APPROVED_MODERATION_FILTER,
+    status: { $in: OTHER_CAMPUS_STATUSES },
+    college: college ? college : { $nin: [ownCollege, '', null] },
+  };
+  if (category && category !== 'all') filter.category = category;
+  if (type) filter.type = type;
+
+  const priceFilter = {};
+  const minPrice = Number(req.query.minPrice);
+  const maxPrice = Number(req.query.maxPrice);
+  if (req.query.minPrice !== undefined && Number.isFinite(minPrice)) priceFilter.$gte = minPrice;
+  if (req.query.maxPrice !== undefined && Number.isFinite(maxPrice)) priceFilter.$lte = maxPrice;
+  if (Object.keys(priceFilter).length > 0) filter.price = priceFilter;
+
+  let projection = OTHER_CAMPUS_LISTING_FIELDS;
+  let sortOpt = OTHER_CAMPUS_SORTS[sort];
+  if (search.length >= 2) {
+    filter.$text = { $search: search };
+    if (sort === 'newest') {
+      // Most relevant first when the user is searching with the default sort.
+      projection = { score: { $meta: 'textScore' } };
+      OTHER_CAMPUS_LISTING_FIELDS.split(' ').forEach(field => { projection[field] = 1; });
+      sortOpt = { score: { $meta: 'textScore' }, _id: -1 };
+    }
+  }
+
+  // Offset pagination: sorts like price aren't monotonic in _id, so a cursor on
+  // _id (as the campus feed uses) would skip or repeat rows.
+  const rows = await Listing.find(filter, projection)
+    .sort(sortOpt)
+    .skip((page - 1) * limit)
+    .limit(limit + 1)
+    .populate('seller', OTHER_CAMPUS_SELLER_FIELDS)
+    .lean();
+
+  const hasMore = rows.length > limit;
+  const payload = {
+    listings: (hasMore ? rows.slice(0, limit) : rows).map(row => {
+      delete row.score; // text-search relevance is internal
+      return decorateListingImages(row);
+    }),
+    pagination: { page, limit, hasMore },
+  };
+
+  await setCacheValue(listingCache, 'listings', cacheKey, payload, 30);
+  return success(res, payload);
+};

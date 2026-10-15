@@ -21,6 +21,30 @@ const router = express.Router();
 // ── Public routes ─────────────────────────────────────────────────────────────
 // IMPORTANT: specific paths MUST come before /:id
 router.get('/search/suggestions', asyncHandler(listingSearchController.getSearchSuggestions));
+
+// ── Other campuses (read-only, verified students only) ───────────────────────
+router.get('/other-campuses/colleges',
+  protect,
+  requireVerified,
+  asyncHandler(listingSearchController.getOtherCampusColleges)
+);
+router.get('/other-campuses',
+  protect,
+  requireVerified,
+  [
+    query('page').optional().isInt({ min: 1, max: 100 }).withMessage('Page must be 1-100'),
+    query('limit').optional().isInt({ min: 1, max: 30 }).withMessage('Limit must be 1-30'),
+    query('sort').optional().isIn(['newest', 'price_asc', 'price_desc']),
+    query('category').optional().isIn(['All', 'all', 'Academia', 'Tech', 'Rides', 'Living', 'Attire', 'Gifts', 'Misc', 'Services', 'academia', 'tech', 'rides', 'living', 'attire', 'gifts', 'misc', 'services']),
+    query('type').optional().isIn(['sell', 'rent', 'free', 'service']),
+    query('minPrice').optional().isFloat({ min: 0 }),
+    query('maxPrice').optional().isFloat({ min: 0 }),
+    query('college').optional().isString().trim().isLength({ max: 100 }),
+    query('search').optional().isString().trim().isLength({ max: 100 }),
+  ],
+  validate,
+  asyncHandler(listingSearchController.getOtherCampusListings)
+);
 router.get('/saved-searches/me',
   protect,
   [
